@@ -4,6 +4,7 @@ import { ModuleTeamSync } from "../../src/modules/features/TeamSync/ModuleTeamSy
 import { TeamConfigManager } from "../../src/modules/features/TeamSync/TeamConfigManager";
 import { createDefaultTeamConfig, type TeamConfig, TEAM_CONFIG_ID } from "../../src/modules/features/TeamSync/types";
 import { CouchDBUserManager } from "../../src/modules/features/TeamSync/CouchDBUserManager";
+import { TeamValidation } from "../../src/modules/features/TeamSync/ValidationFunction";
 
 describe("ModuleTeamSync", async () => {
     let harness: LiveSyncHarness;
@@ -113,5 +114,32 @@ describe("CouchDBUserManager", () => {
         expect(CouchDBUserManager.teamRoleToCouchDBRoles("admin")).toEqual(["admin", "team_admin"]);
         expect(CouchDBUserManager.teamRoleToCouchDBRoles("editor")).toEqual(["team_editor"]);
         expect(CouchDBUserManager.teamRoleToCouchDBRoles("viewer")).toEqual(["team_viewer"]);
+    });
+});
+
+describe("TeamValidation", () => {
+    it("should generate a valid design document", () => {
+        const designDoc = TeamValidation.buildDesignDocument();
+        expect(designDoc._id).toBe("_design/team_validation");
+        expect(designDoc.validate_doc_update).toBeDefined();
+        expect(typeof designDoc.validate_doc_update).toBe("string");
+    });
+
+    it("should include viewer write restriction", () => {
+        const designDoc = TeamValidation.buildDesignDocument();
+        expect(designDoc.validate_doc_update).toContain("team_viewer");
+        expect(designDoc.validate_doc_update).toContain("forbidden");
+    });
+
+    it("should allow viewer to write readstate docs", () => {
+        const designDoc = TeamValidation.buildDesignDocument();
+        expect(designDoc.validate_doc_update).toContain("readstate:");
+    });
+
+    it("should restrict team config to admins", () => {
+        const designDoc = TeamValidation.buildDesignDocument();
+        expect(designDoc.validate_doc_update).toContain("team:config");
+        expect(designDoc.validate_doc_update).toContain("team:settings:");
+        expect(designDoc.validate_doc_update).toContain("team_admin");
     });
 });
