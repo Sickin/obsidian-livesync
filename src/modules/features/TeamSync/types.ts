@@ -79,3 +79,21 @@ export function createDefaultTeamConfig(teamName: string, adminUsername: string)
         },
     };
 }
+
+/**
+ * Read state for a single file, stored in local SimpleStore (not synced).
+ */
+export interface FileReadState {
+    lastSeenRev: string;
+    lastSeenAt: number; // timestamp ms
+}
+
+/**
+ * An entry in the team activity feed.
+ */
+export interface TeamActivityEntry {
+    filePath: string;
+    modifiedBy: string;
+    timestamp: number; // mtime from document
+    rev: string;
+}
