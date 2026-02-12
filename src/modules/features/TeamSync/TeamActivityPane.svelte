@@ -32,13 +32,17 @@
         }
 
         loadingDiffs = new Set([...loadingDiffs, key]);
-        const result = await onLoadDiff(entry.filePath, entry.rev);
-        const nextLoading = new Set(loadingDiffs);
-        nextLoading.delete(key);
-        loadingDiffs = nextLoading;
-
-        if (result) {
-            expandedDiffs = new Map([...expandedDiffs, [key, result]]);
+        try {
+            const result = await onLoadDiff(entry.filePath, entry.rev);
+            if (result) {
+                expandedDiffs = new Map([...expandedDiffs, [key, result]]);
+            }
+        } catch {
+            // Diff load failed — silently ignore
+        } finally {
+            const nextLoading = new Set(loadingDiffs);
+            nextLoading.delete(key);
+            loadingDiffs = nextLoading;
         }
     }
 
@@ -216,7 +220,7 @@
                         onclick={(e) => { e.stopPropagation(); toggleDiff(entry); }}
                         role="button"
                         tabindex="0"
-                        onkeydown={(e) => e.key === "Enter" && toggleDiff(entry)}
+                        onkeydown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), toggleDiff(entry))}
                     >
                         {#if loadingDiffs.has(entry.filePath + ":" + entry.rev)}
                             Loading...

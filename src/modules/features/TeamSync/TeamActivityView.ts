@@ -4,6 +4,7 @@ import type ObsidianLiveSyncPlugin from "../../../main.ts";
 import { SvelteItemView } from "../../../common/SvelteItemView.ts";
 import { mount } from "svelte";
 import type { ChangeTracker } from "./ChangeTracker.ts";
+import type { FilePathWithPrefix } from "../../../lib/src/common/types.ts";
 import { getDocData } from "../../../lib/src/common/utils.ts";
 
 export const VIEW_TYPE_TEAM_ACTIVITY = "team-activity";
@@ -28,7 +29,7 @@ export class TeamActivityView extends SvelteItemView {
         const db = this.plugin.localDatabase;
         try {
             const entry = await db.getDBEntry(
-                filePath as any,
+                filePath as FilePathWithPrefix,
                 { rev },
                 false,
                 false,
@@ -52,7 +53,7 @@ export class TeamActivityView extends SvelteItemView {
             if (revIndex >= 0 && revIndex + 1 < revs.length) {
                 const prevRev = revs[revIndex + 1].rev;
                 const prevEntry = await db.getDBEntry(
-                    filePath as any,
+                    filePath as FilePathWithPrefix,
                     { rev: prevRev },
                     false,
                     false,
