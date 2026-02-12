@@ -1,9 +1,11 @@
 import { LOG_LEVEL_INFO, LOG_LEVEL_VERBOSE } from "octagonal-wheels/common/logger";
 import { AbstractObsidianModule } from "../../AbstractObsidianModule.ts";
 import type { LiveSyncCore } from "../../../main.ts";
-import type { TeamConfig } from "./types.ts";
+import type { TeamConfig, TeamRole } from "./types.ts";
 import { TEAM_CONFIG_ID } from "./types.ts";
 import { TeamConfigManager } from "./TeamConfigManager.ts";
+import { CouchDBUserManager } from "./CouchDBUserManager.ts";
+import { TeamValidation } from "./ValidationFunction.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
@@ -67,6 +69,131 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             await this._loadTeamConfig();
         }
         return true;
+    }
+
+    private _userManager: CouchDBUserManager | undefined;
+
+    private _getUserManager(): CouchDBUserManager {
+        if (!this._userManager) {
+            this._userManager = new CouchDBUserManager(
+                this.settings.couchDB_URI,
+                {
+                    username: this.settings.couchDB_USER,
+                    password: this.settings.couchDB_PASSWORD,
+                }
+            );
+        }
+        return this._userManager;
+    }
+
+    /**
+     * Initialize team mode: creates config doc, validation function, and registers admin.
+     */
+    async initializeTeam(teamName: string): Promise<boolean> {
+        const username = this.getCurrentUsername();
+        if (!username) return false;
+
+        const success = await this.configManager.initializeTeam(teamName, username);
+        if (!success) return false;
+
+        const authHeader = `Basic ${btoa(`${this.settings.couchDB_USER}:${this.settings.couchDB_PASSWORD}`)}`;
+        await TeamValidation.install(
+            this.settings.couchDB_URI,
+            this.settings.couchDB_DBNAME,
+            authHeader
+        );
+
+        await this._loadTeamConfig();
+        return true;
+    }
+
+    /**
+     * Invite a new team member: creates CouchDB user and adds to team config.
+     */
+    async inviteMember(username: string, password: string, role: TeamRole): Promise<boolean> {
+        const userManager = this._getUserManager();
+        const created = await userManager.createUser(username, password, role);
+        if (!created) return false;
+        return this.configManager.addMember(username, role);
+    }
+
+    /**
+     * Change a member's role in both CouchDB and team config.
+     */
+    async changeMemberRole(username: string, role: TeamRole): Promise<boolean> {
+        const userManager = this._getUserManager();
+        const updated = await userManager.updateUserRole(username, role);
+        if (!updated) return false;
+        return this.configManager.updateMemberRole(username, role);
+    }
+
+    /**
+     * Remove a member from the team and CouchDB.
+     */
+    async removeMember(username: string): Promise<boolean> {
+        const userManager = this._getUserManager();
+        await userManager.deleteUser(username);
+        return this.configManager.removeMember(username);
+    }
+
+    /**
+     * Reset a member's password.
+     */
+    async resetMemberPassword(username: string, newPassword: string): Promise<boolean> {
+        const userManager = this._getUserManager();
+        return userManager.resetPassword(username, newPassword);
+    }
+
+    /**
+     * Called by the settings dialogue to render the team management pane.
+     * Returns a cleanup function.
+     */
+    renderTeamPane(containerEl: HTMLElement): () => void {
+        import("./TeamManagementPane.svelte").then(async ({ default: TeamManagementPane }) => {
+            const { mount, unmount } = await import("svelte");
+            const { writable } = await import("svelte/store");
+
+            const port = writable({
+                teamConfig: this._teamConfig ?? null,
+                currentUsername: this.getCurrentUsername(),
+                isAdmin: this.isCurrentUserAdmin(),
+                onInitializeTeam: async (teamName: string) => {
+                    await this.initializeTeam(teamName);
+                    port.update((p) => p ? { ...p, teamConfig: this._teamConfig ?? null } : p);
+                },
+                onInviteMember: async (username: string, password: string, role: TeamRole) => {
+                    await this.inviteMember(username, password, role);
+                    await this._loadTeamConfig();
+                    port.update((p) => p ? { ...p, teamConfig: this._teamConfig ?? null } : p);
+                },
+                onChangeMemberRole: async (username: string, role: TeamRole) => {
+                    await this.changeMemberRole(username, role);
+                    await this._loadTeamConfig();
+                    port.update((p) => p ? { ...p, teamConfig: this._teamConfig ?? null } : p);
+                },
+                onRemoveMember: async (username: string) => {
+                    await this.removeMember(username);
+                    await this._loadTeamConfig();
+                    port.update((p) => p ? { ...p, teamConfig: this._teamConfig ?? null } : p);
+                },
+                onResetPassword: async (username: string, password: string) => {
+                    await this.resetMemberPassword(username, password);
+                },
+            });
+
+            const component = mount(TeamManagementPane, {
+                target: containerEl,
+                props: { port },
+            });
+
+            (containerEl as any).__teamPaneCleanup = () => unmount(component);
+        });
+
+        return () => {
+            if ((containerEl as any).__teamPaneCleanup) {
+                (containerEl as any).__teamPaneCleanup();
+            }
+        };
     }
 
     onBindFunction(core: LiveSyncCore, services: typeof core.services): void {
