@@ -67,6 +67,17 @@ export class ChangeTracker {
     }
 
     /**
+     * Get a list of unique authors from the activity feed.
+     */
+    getAuthors(): string[] {
+        const authors = new Set<string>();
+        for (const entry of this._activityFeed) {
+            authors.add(entry.modifiedBy);
+        }
+        return [...authors].sort();
+    }
+
+    /**
      * Update the current username (e.g., after settings change).
      */
     setCurrentUsername(username: string): void {

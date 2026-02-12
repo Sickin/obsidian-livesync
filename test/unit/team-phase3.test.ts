@@ -1,5 +1,6 @@
 import { describe, it, expect } from "vitest";
 import { TeamDiffService } from "../../src/modules/features/TeamSync/TeamDiffService";
+import { ChangeTracker } from "../../src/modules/features/TeamSync/ChangeTracker";
 
 describe("TeamDiffService", () => {
     describe("computeDiff", () => {
@@ -61,5 +62,23 @@ describe("TeamDiffService", () => {
             expect(html).not.toContain("<script>");
             expect(html).toContain("&lt;script&gt;");
         });
+    });
+});
+
+describe("ChangeTracker filtering", () => {
+    it("should return unique authors from activity feed", () => {
+        const tracker = new ChangeTracker("me");
+        tracker.trackChange("file1.md", "alice", Date.now(), "1-abc");
+        tracker.trackChange("file2.md", "bob", Date.now(), "2-def");
+        tracker.trackChange("file3.md", "alice", Date.now(), "3-ghi");
+        const authors = tracker.getAuthors();
+        expect(authors).toContain("alice");
+        expect(authors).toContain("bob");
+        expect(authors.length).toBe(2);
+    });
+
+    it("should return empty array when no activity", () => {
+        const tracker = new ChangeTracker("me");
+        expect(tracker.getAuthors()).toEqual([]);
     });
 });
