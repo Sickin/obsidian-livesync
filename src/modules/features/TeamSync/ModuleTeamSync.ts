@@ -11,12 +11,14 @@ import { ReadStateManager } from "./ReadStateManager.ts";
 import { ChangeTracker } from "./ChangeTracker.ts";
 import { EVENT_TEAM_FILE_CHANGED, EVENT_TEAM_FILE_READ, EVENT_TEAM_ACTIVITY_UPDATED } from "./events.ts";
 import { eventHub } from "../../../common/events.ts";
+import { TeamFileDecorator } from "./TeamFileDecorator.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
     configManager!: TeamConfigManager;
     readStateManager: ReadStateManager | undefined;
     changeTracker: ChangeTracker | undefined;
+    private _fileDecorator: TeamFileDecorator | undefined;
 
     /**
      * Whether team mode is currently enabled.
@@ -119,6 +121,22 @@ export class ModuleTeamSync extends AbstractObsidianModule {
                 eventHub.emitEvent(EVENT_TEAM_FILE_READ, filePath as FilePathWithPrefix);
             })
         );
+
+        // Set up file decorator once layout is ready
+        this.app.workspace.onLayoutReady(() => {
+            if (this.changeTracker) {
+                this._fileDecorator = new TeamFileDecorator(
+                    this.changeTracker,
+                    document.body
+                );
+            }
+        });
+
+        this.plugin.register(() => {
+            this._fileDecorator?.destroy();
+            this._fileDecorator = undefined;
+        });
+
         return Promise.resolve(true);
     }
 
