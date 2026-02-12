@@ -2,13 +2,21 @@ import { LOG_LEVEL_INFO, LOG_LEVEL_VERBOSE } from "octagonal-wheels/common/logge
 import { AbstractObsidianModule } from "../../AbstractObsidianModule.ts";
 import type { LiveSyncCore } from "../../../main.ts";
 import type { TeamConfig, TeamRole } from "./types.ts";
+import type { MetaEntry, FilePathWithPrefix } from "../../../lib/src/common/types.ts";
+import { getPath } from "../../../common/utils.ts";
 import { TeamConfigManager } from "./TeamConfigManager.ts";
 import { CouchDBUserManager } from "./CouchDBUserManager.ts";
 import { TeamValidation } from "./ValidationFunction.ts";
+import { ReadStateManager } from "./ReadStateManager.ts";
+import { ChangeTracker } from "./ChangeTracker.ts";
+import { EVENT_TEAM_FILE_CHANGED, EVENT_TEAM_FILE_READ, EVENT_TEAM_ACTIVITY_UPDATED } from "./events.ts";
+import { eventHub } from "../../../common/events.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
     configManager!: TeamConfigManager;
+    readStateManager: ReadStateManager | undefined;
+    changeTracker: ChangeTracker | undefined;
 
     /**
      * Whether team mode is currently enabled.
@@ -66,8 +74,52 @@ export class ModuleTeamSync extends AbstractObsidianModule {
     private async _onReady(): Promise<boolean> {
         if (this.isDatabaseReady()) {
             await this._loadTeamConfig();
+
+            // Initialize read state manager
+            const store = this.services.database.openSimpleStore<any>("team-readstate");
+            this.readStateManager = new ReadStateManager(store);
+
+            // Initialize change tracker
+            this.changeTracker = new ChangeTracker(this.getCurrentUsername());
         }
         return true;
+    }
+
+    /**
+     * Called when a document arrives from remote replication.
+     * Checks modifiedBy and updates change tracker if from another user.
+     */
+    private async _onDocumentArrived(entry: MetaEntry): Promise<boolean> {
+        if (!this.isTeamModeEnabled() || !this.changeTracker) return true;
+
+        const modifiedBy = (entry as any).modifiedBy as string | undefined;
+        if (!modifiedBy) return true;
+
+        const filePath = getPath(entry);
+        const rev = entry._rev ?? "";
+        const timestamp = entry.mtime ?? Date.now();
+
+        this.changeTracker.trackChange(filePath, modifiedBy, timestamp, rev);
+
+        if (modifiedBy !== this.getCurrentUsername()) {
+            eventHub.emitEvent(EVENT_TEAM_FILE_CHANGED, filePath as FilePathWithPrefix);
+        }
+
+        eventHub.emitEvent(EVENT_TEAM_ACTIVITY_UPDATED, undefined);
+        return true;
+    }
+
+    private _everyOnloadStart(): Promise<boolean> {
+        // Listen for file opens to clear unread state
+        this.plugin.registerEvent(
+            this.app.workspace.on("file-open", (file) => {
+                if (!file || !this.changeTracker || !this.readStateManager) return;
+                const filePath = file.path;
+                this.changeTracker.markAsRead(filePath);
+                eventHub.emitEvent(EVENT_TEAM_FILE_READ, filePath as FilePathWithPrefix);
+            })
+        );
+        return Promise.resolve(true);
     }
 
     private _userManager: CouchDBUserManager | undefined;
@@ -196,6 +248,8 @@ export class ModuleTeamSync extends AbstractObsidianModule {
     }
 
     onBindFunction(core: LiveSyncCore, services: typeof core.services): void {
+        services.appLifecycle.onInitialise.addHandler(this._everyOnloadStart.bind(this));
         services.appLifecycle.onSettingLoaded.addHandler(this._onReady.bind(this));
+        services.replication.processSynchroniseResult.addHandler(this._onDocumentArrived.bind(this));
     }
 }
