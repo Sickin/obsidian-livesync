@@ -2,7 +2,6 @@ import { LOG_LEVEL_INFO, LOG_LEVEL_VERBOSE } from "octagonal-wheels/common/logge
 import { AbstractObsidianModule } from "../../AbstractObsidianModule.ts";
 import type { LiveSyncCore } from "../../../main.ts";
 import type { TeamConfig, TeamRole } from "./types.ts";
-import { TEAM_CONFIG_ID } from "./types.ts";
 import { TeamConfigManager } from "./TeamConfigManager.ts";
 import { CouchDBUserManager } from "./CouchDBUserManager.ts";
 import { TeamValidation } from "./ValidationFunction.ts";
@@ -141,7 +140,7 @@ export class ModuleTeamSync extends AbstractObsidianModule {
      */
     async resetMemberPassword(username: string, newPassword: string): Promise<boolean> {
         const userManager = this._getUserManager();
-        return userManager.resetPassword(username, newPassword);
+        return await userManager.resetPassword(username, newPassword);
     }
 
     /**
@@ -149,7 +148,7 @@ export class ModuleTeamSync extends AbstractObsidianModule {
      * Returns a cleanup function.
      */
     renderTeamPane(containerEl: HTMLElement): () => void {
-        import("./TeamManagementPane.svelte").then(async ({ default: TeamManagementPane }) => {
+        void import("./TeamManagementPane.svelte").then(async ({ default: TeamManagementPane }) => {
             const { mount, unmount } = await import("svelte");
             const { writable } = await import("svelte/store");
 
