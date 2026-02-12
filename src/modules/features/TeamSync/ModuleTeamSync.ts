@@ -3,9 +3,11 @@ import { AbstractObsidianModule } from "../../AbstractObsidianModule.ts";
 import type { LiveSyncCore } from "../../../main.ts";
 import type { TeamConfig } from "./types.ts";
 import { TEAM_CONFIG_ID } from "./types.ts";
+import { TeamConfigManager } from "./TeamConfigManager.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
+    configManager!: TeamConfigManager;
 
     /**
      * Whether team mode is currently enabled.
@@ -46,13 +48,12 @@ export class ModuleTeamSync extends AbstractObsidianModule {
     }
 
     private async _loadTeamConfig(): Promise<void> {
+        this.configManager = new TeamConfigManager(this.localDatabase);
         try {
-            const doc = await this.localDatabase.localDatabase.get(TEAM_CONFIG_ID);
-            if (doc && !(doc as any)._deleted) {
-                this._teamConfig = doc as unknown as TeamConfig;
+            this._teamConfig = await this.configManager.getConfig() ?? undefined;
+            if (this._teamConfig) {
                 this._log("Team mode enabled: " + this._teamConfig.teamName, LOG_LEVEL_INFO);
             } else {
-                this._teamConfig = undefined;
                 this._log("Team mode not configured", LOG_LEVEL_VERBOSE);
             }
         } catch {
