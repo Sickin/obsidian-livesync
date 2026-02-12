@@ -12,6 +12,7 @@ import { ChangeTracker } from "./ChangeTracker.ts";
 import { EVENT_TEAM_FILE_CHANGED, EVENT_TEAM_FILE_READ, EVENT_TEAM_ACTIVITY_UPDATED } from "./events.ts";
 import { eventHub } from "../../../common/events.ts";
 import { TeamFileDecorator } from "./TeamFileDecorator.ts";
+import { TeamActivityView, VIEW_TYPE_TEAM_ACTIVITY } from "./TeamActivityView.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
@@ -135,6 +136,22 @@ export class ModuleTeamSync extends AbstractObsidianModule {
         this.plugin.register(() => {
             this._fileDecorator?.destroy();
             this._fileDecorator = undefined;
+        });
+
+        // Register team activity sidebar view
+        this.registerView(VIEW_TYPE_TEAM_ACTIVITY, (leaf) => {
+            if (!this.changeTracker) {
+                throw new Error("Team Activity view requires change tracker initialization.");
+            }
+            return new TeamActivityView(leaf, this.plugin, this.changeTracker);
+        });
+
+        this.addCommand({
+            id: "show-team-activity",
+            name: "Show Team Activity",
+            callback: () => {
+                void this.services.API.showWindow(VIEW_TYPE_TEAM_ACTIVITY);
+            },
         });
 
         return Promise.resolve(true);
