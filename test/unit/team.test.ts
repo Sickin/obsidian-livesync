@@ -3,6 +3,7 @@ import { generateHarness, waitForReady, type LiveSyncHarness } from "../harness/
 import { ModuleTeamSync } from "../../src/modules/features/TeamSync/ModuleTeamSync";
 import { TeamConfigManager } from "../../src/modules/features/TeamSync/TeamConfigManager";
 import { createDefaultTeamConfig, type TeamConfig, TEAM_CONFIG_ID } from "../../src/modules/features/TeamSync/types";
+import { CouchDBUserManager } from "../../src/modules/features/TeamSync/CouchDBUserManager";
 
 describe("ModuleTeamSync", async () => {
     let harness: LiveSyncHarness;
@@ -91,5 +92,26 @@ describe("TeamConfigManager", async () => {
         await configManager.removeMember("viewer-user");
         const config = await configManager.getConfig();
         expect(config!.members["viewer-user"]).toBeUndefined();
+    });
+});
+
+describe("CouchDBUserManager", () => {
+    it("should build correct user document", () => {
+        const doc = CouchDBUserManager.buildUserDocument("alice", "password123", ["editor"]);
+        expect(doc._id).toBe("org.couchdb.user:alice");
+        expect(doc.name).toBe("alice");
+        expect(doc.type).toBe("user");
+        expect(doc.roles).toEqual(["editor"]);
+        expect(doc.password).toBe("password123");
+    });
+
+    it("should build correct user document ID", () => {
+        expect(CouchDBUserManager.userDocId("bob")).toBe("org.couchdb.user:bob");
+    });
+
+    it("should map team roles to CouchDB roles", () => {
+        expect(CouchDBUserManager.teamRoleToCouchDBRoles("admin")).toEqual(["admin", "team_admin"]);
+        expect(CouchDBUserManager.teamRoleToCouchDBRoles("editor")).toEqual(["team_editor"]);
+        expect(CouchDBUserManager.teamRoleToCouchDBRoles("viewer")).toEqual(["team_viewer"]);
     });
 });
