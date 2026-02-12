@@ -82,3 +82,34 @@ describe("ChangeTracker filtering", () => {
         expect(tracker.getAuthors()).toEqual([]);
     });
 });
+
+describe("Phase 3 Integration", () => {
+    it("should export TeamDiffService with all static methods", async () => {
+        const { TeamDiffService } = await import(
+            "../../src/modules/features/TeamSync/TeamDiffService"
+        );
+        expect(typeof TeamDiffService.computeDiff).toBe("function");
+        expect(typeof TeamDiffService.computeDiffSummary).toBe("function");
+        expect(typeof TeamDiffService.renderDiffToHtml).toBe("function");
+    });
+
+    it("should export TeamDiffView constants", async () => {
+        const { VIEW_TYPE_TEAM_DIFF } = await import(
+            "../../src/modules/features/TeamSync/TeamDiffView"
+        );
+        expect(VIEW_TYPE_TEAM_DIFF).toBe("team-diff");
+    });
+
+    it("should compute full diff pipeline", () => {
+        const old = "Line 1\nLine 2\nLine 3";
+        const cur = "Line 1\nLine 2 modified\nLine 3\nLine 4";
+        const diff = TeamDiffService.computeDiff(old, cur);
+        const html = TeamDiffService.renderDiffToHtml(diff);
+        const summary = TeamDiffService.computeDiffSummary(diff);
+
+        expect(html).toContain("team-diff-added");
+        expect(html).toContain("team-diff-deleted");
+        expect(summary.added).toBeGreaterThan(0);
+        expect(summary.removed).toBeGreaterThan(0);
+    });
+});
