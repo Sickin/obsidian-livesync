@@ -60,6 +60,7 @@ import { ModuleLocalDatabaseObsidian } from "./modules/core/ModuleLocalDatabaseO
 import { ModuleConflictChecker } from "./modules/coreFeatures/ModuleConflictChecker.ts";
 import { ModuleResolvingMismatchedTweaks } from "./modules/coreFeatures/ModuleResolveMismatchedTweaks.ts";
 import { ModuleIntegratedTest } from "./modules/extras/ModuleIntegratedTest.ts";
+import { ModuleTeamSync } from "./modules/features/TeamSync/ModuleTeamSync.ts";
 import { ModuleRebuilder } from "./modules/core/ModuleRebuilder.ts";
 import { ModuleReplicateTest } from "./modules/extras/ModuleReplicateTest.ts";
 import { ModuleLiveSyncMain } from "./modules/main/ModuleLiveSyncMain.ts";
@@ -146,6 +147,7 @@ export default class ObsidianLiveSyncPlugin
         new ModuleInteractiveConflictResolver(this, this),
         new ModuleObsidianGlobalHistory(this, this),
         new ModuleCheckRemoteSize(this, this),
+        new ModuleTeamSync(this, this),
         // Test and Dev Modules
         new ModuleDev(this, this),
         new ModuleReplicateTest(this, this),

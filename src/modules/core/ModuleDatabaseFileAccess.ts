@@ -192,6 +192,12 @@ export class ModuleDatabaseFileAccess extends AbstractModule implements Database
             type: datatype,
             eden: {},
         };
+        // Team attribution: stamp current user on all document writes.
+        // CouchDB stores this field even though SavingEntry doesn't declare it.
+        const username = this.settings.couchDB_USER;
+        if (username) {
+            (d as any).modifiedBy = username;
+        }
         //upsert should locked
         const msg = `STORAGE -> DB (${datatype}) `;
         const isNotChanged = await serialized("file-" + fullPath, async () => {
