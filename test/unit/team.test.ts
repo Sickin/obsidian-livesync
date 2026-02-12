@@ -143,3 +143,65 @@ describe("TeamValidation", () => {
         expect(designDoc.validate_doc_update).toContain("team_admin");
     });
 });
+
+describe("Team Module Integration", async () => {
+    let harness: LiveSyncHarness;
+    const vaultName = "TestVaultTeamIntegration" + Date.now();
+
+    beforeAll(async () => {
+        harness = await generateHarness(vaultName, {
+            couchDB_USER: "test-admin",
+            couchDB_PASSWORD: "test-password",
+            couchDB_URI: "http://localhost:5984",
+            couchDB_DBNAME: "test-team-db",
+        });
+        await waitForReady(harness);
+    });
+
+    afterAll(async () => {
+        await harness?.dispose();
+    });
+
+    it("should start with team mode disabled", () => {
+        const teamModule = harness.plugin.getModule(ModuleTeamSync);
+        expect(teamModule.isTeamModeEnabled()).toBe(false);
+        expect(teamModule.getCurrentUserRole()).toBeUndefined();
+        expect(teamModule.isCurrentUserAdmin()).toBe(false);
+    });
+
+    it("should report correct username from settings", () => {
+        const teamModule = harness.plugin.getModule(ModuleTeamSync);
+        expect(teamModule.getCurrentUsername()).toBe("test-admin");
+    });
+
+    it("should be able to create a team config via configManager", async () => {
+        const configManager = new TeamConfigManager(harness.plugin.localDatabase);
+        const config = createDefaultTeamConfig("Integration Test Team", "test-admin");
+        const saved = await configManager.saveConfig(config);
+        expect(saved).toBe(true);
+    });
+
+    it("should generate valid validation function", () => {
+        const designDoc = TeamValidation.buildDesignDocument();
+        expect(designDoc._id).toBe("_design/team_validation");
+        // Verify the function is syntactically valid JavaScript
+        expect(() => new Function("return " + designDoc.validate_doc_update)).not.toThrow();
+    });
+
+    it("should build correct CouchDB user docs for each role", () => {
+        const adminDoc = CouchDBUserManager.buildUserDocument(
+            "alice", "pass", CouchDBUserManager.teamRoleToCouchDBRoles("admin")
+        );
+        expect(adminDoc.roles).toContain("team_admin");
+
+        const editorDoc = CouchDBUserManager.buildUserDocument(
+            "bob", "pass", CouchDBUserManager.teamRoleToCouchDBRoles("editor")
+        );
+        expect(editorDoc.roles).toContain("team_editor");
+
+        const viewerDoc = CouchDBUserManager.buildUserDocument(
+            "carol", "pass", CouchDBUserManager.teamRoleToCouchDBRoles("viewer")
+        );
+        expect(viewerDoc.roles).toContain("team_viewer");
+    });
+});
