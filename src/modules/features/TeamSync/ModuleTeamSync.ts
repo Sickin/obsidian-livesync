@@ -13,6 +13,8 @@ import { EVENT_TEAM_FILE_CHANGED, EVENT_TEAM_FILE_READ, EVENT_TEAM_ACTIVITY_UPDA
 import { eventHub } from "../../../common/events.ts";
 import { TeamFileDecorator } from "./TeamFileDecorator.ts";
 import { TeamActivityView, VIEW_TYPE_TEAM_ACTIVITY } from "./TeamActivityView.ts";
+import { TeamDiffView, VIEW_TYPE_TEAM_DIFF, type TeamDiffViewState } from "./TeamDiffView.ts";
+import { getDocData } from "../../../lib/src/common/utils.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
@@ -112,6 +114,78 @@ export class ModuleTeamSync extends AbstractObsidianModule {
         return true;
     }
 
+    /**
+     * Open a team diff view for a file.
+     * Shows diff between last-seen revision and current revision.
+     */
+    async openTeamDiff(filePath: string): Promise<void> {
+        const pathWithPrefix = filePath as FilePathWithPrefix;
+
+        // Get current entry
+        const currentEntry = await this.core.databaseFileAccess.fetchEntry(pathWithPrefix, undefined, true, true);
+        if (currentEntry === false) {
+            this._log("Cannot load current revision for diff", LOG_LEVEL_INFO);
+            return;
+        }
+
+        const currentRev = currentEntry._rev ?? "";
+        const currentContent = typeof currentEntry.data === "string"
+            ? currentEntry.data
+            : getDocData(currentEntry.data);
+        const currentMtime = currentEntry.mtime;
+
+        // Get last-seen revision from read state
+        let oldContent = "";
+        let oldRev = "";
+        let oldMtime = 0;
+        const readState = await this.readStateManager?.getReadState(filePath);
+
+        if (readState && readState.lastSeenRev !== currentRev) {
+            try {
+                const oldEntry = await this.core.databaseFileAccess.fetchEntry(
+                    pathWithPrefix, readState.lastSeenRev, true, true
+                );
+                if (oldEntry !== false) {
+                    oldRev = readState.lastSeenRev;
+                    oldContent = typeof oldEntry.data === "string"
+                        ? oldEntry.data
+                        : getDocData(oldEntry.data);
+                    oldMtime = oldEntry.mtime;
+                }
+            } catch {
+                // Old revision may have been compacted — fall back to empty
+            }
+        }
+
+        // Collect authors from activity feed
+        const authors: string[] = [];
+        if (this.changeTracker) {
+            const feed = this.changeTracker.getActivityFeed();
+            for (const entry of feed) {
+                if (entry.filePath === filePath && !authors.includes(entry.modifiedBy)) {
+                    authors.push(entry.modifiedBy);
+                }
+            }
+        }
+        if (authors.length === 0) authors.push("Unknown");
+
+        // Open in a new leaf
+        const state: TeamDiffViewState = {
+            filePath,
+            oldContent,
+            newContent: currentContent,
+            oldRev: oldRev || "(initial)",
+            newRev: currentRev,
+            authors,
+            oldMtime,
+            newMtime: currentMtime,
+        };
+
+        const leaf = this.app.workspace.getLeaf("tab");
+        const view = new TeamDiffView(leaf, this.plugin, state);
+        await leaf.open(view);
+    }
+
     private _everyOnloadStart(): Promise<boolean> {
         // Listen for file opens to clear unread state
         this.plugin.registerEvent(
@@ -153,6 +227,35 @@ export class ModuleTeamSync extends AbstractObsidianModule {
                 void this.services.API.showWindow(VIEW_TYPE_TEAM_ACTIVITY);
             },
         });
+
+        // Register team diff view
+        this.registerView(VIEW_TYPE_TEAM_DIFF, (leaf) => {
+            return new TeamDiffView(leaf, this.plugin, {
+                filePath: "",
+                oldContent: "",
+                newContent: "",
+                oldRev: "",
+                newRev: "",
+                authors: [],
+                oldMtime: 0,
+                newMtime: 0,
+            });
+        });
+
+        // Add "View Team Changes" to file context menu
+        this.plugin.registerEvent(
+            this.app.workspace.on("file-menu", (menu, file) => {
+                if (!this.isTeamModeEnabled() || !this.changeTracker) return;
+                if (!this.changeTracker.isUnread(file.path)) return;
+                menu.addItem((item) => {
+                    item.setTitle("View Team Changes")
+                        .setIcon("file-diff")
+                        .onClick(() => {
+                            void this.openTeamDiff(file.path);
+                        });
+                });
+            })
+        );
 
         return Promise.resolve(true);
     }

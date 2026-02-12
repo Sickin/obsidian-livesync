@@ -7,14 +7,70 @@
     type Props = {
         getActivityFeed: () => TeamActivityEntry[];
         getUnreadFiles: () => Set<string>;
+        getAuthors: () => string[];
         onOpenFile: (filePath: string) => void;
+        onLoadDiff: (filePath: string, rev: string) => Promise<{ html: string; summary: string } | null>;
     };
 
-    const { getActivityFeed, getUnreadFiles, onOpenFile }: Props = $props();
+    const { getActivityFeed, getUnreadFiles, getAuthors, onOpenFile, onLoadDiff }: Props = $props();
 
     let feed = $state<TeamActivityEntry[]>([]);
     let unreadFiles = $state<Set<string>>(new Set());
     let disposers: (() => void)[] = [];
+
+    // Inline diff state
+    let expandedDiffs = $state<Map<string, { html: string; summary: string }>>(new Map());
+    let loadingDiffs = $state<Set<string>>(new Set());
+
+    async function toggleDiff(entry: TeamActivityEntry) {
+        const key = entry.filePath + ":" + entry.rev;
+        if (expandedDiffs.has(key)) {
+            const next = new Map(expandedDiffs);
+            next.delete(key);
+            expandedDiffs = next;
+            return;
+        }
+
+        loadingDiffs = new Set([...loadingDiffs, key]);
+        try {
+            const result = await onLoadDiff(entry.filePath, entry.rev);
+            if (result) {
+                expandedDiffs = new Map([...expandedDiffs, [key, result]]);
+            }
+        } catch {
+            // Diff load failed — silently ignore
+        } finally {
+            const nextLoading = new Set(loadingDiffs);
+            nextLoading.delete(key);
+            loadingDiffs = nextLoading;
+        }
+    }
+
+    // Filter state
+    let filterAuthor = $state<string>("");
+    let filterFolder = $state<string>("");
+    let filterDateRange = $state<string>("all");
+    let showFilters = $state(false);
+
+    function getDateCutoff(range: string): number {
+        const now = Date.now();
+        switch (range) {
+            case "today": return now - 86400000;
+            case "week": return now - 86400000 * 7;
+            case "month": return now - 86400000 * 30;
+            default: return 0;
+        }
+    }
+
+    const filteredFeed = $derived.by(() => {
+        const cutoff = getDateCutoff(filterDateRange);
+        return feed.filter((entry) => {
+            if (filterAuthor && entry.modifiedBy !== filterAuthor) return false;
+            if (filterFolder && !entry.filePath.startsWith(filterFolder)) return false;
+            if (cutoff && entry.timestamp < cutoff) return false;
+            return true;
+        });
+    });
 
     function refresh() {
         feed = getActivityFeed();
@@ -66,7 +122,7 @@
         const groups: { date: string; entries: TeamActivityEntry[] }[] = [];
         let currentDate = "";
 
-        for (const entry of feed) {
+        for (const entry of filteredFeed) {
             const date = new Date(entry.timestamp).toLocaleDateString([], {
                 weekday: "long",
                 month: "long",
@@ -85,7 +141,51 @@
 <div class="team-activity">
     <h4 class="team-activity-header">Team Activity</h4>
 
-    {#if feed.length === 0}
+    <div class="team-activity-filter-bar">
+        <button
+            class="team-activity-filter-toggle"
+            onclick={() => showFilters = !showFilters}
+        >
+            Filter {showFilters ? "▼" : "▶"}
+            {#if filterAuthor || filterFolder || filterDateRange !== "all"}
+                <span class="team-filter-active-badge"></span>
+            {/if}
+        </button>
+    </div>
+
+    {#if showFilters}
+        <div class="team-activity-filters">
+            <div class="team-filter-row">
+                <label class="team-filter-label">Author</label>
+                <select bind:value={filterAuthor} class="team-filter-select">
+                    <option value="">All</option>
+                    {#each getAuthors() as author}
+                        <option value={author}>{author}</option>
+                    {/each}
+                </select>
+            </div>
+            <div class="team-filter-row">
+                <label class="team-filter-label">Date</label>
+                <select bind:value={filterDateRange} class="team-filter-select">
+                    <option value="all">All time</option>
+                    <option value="today">Today</option>
+                    <option value="week">Last 7 days</option>
+                    <option value="month">Last 30 days</option>
+                </select>
+            </div>
+            <div class="team-filter-row">
+                <label class="team-filter-label">Folder</label>
+                <input
+                    type="text"
+                    bind:value={filterFolder}
+                    placeholder="e.g. research/"
+                    class="team-filter-input"
+                />
+            </div>
+        </div>
+    {/if}
+
+    {#if filteredFeed.length === 0}
         <div class="team-activity-empty">No team activity yet.</div>
     {:else}
         {#each groupedFeed as group}
@@ -114,6 +214,28 @@
                         </div>
                     </div>
                 </div>
+                <div class="team-activity-diff-summary">
+                    <span
+                        class="team-activity-diff-toggle"
+                        onclick={(e) => { e.stopPropagation(); toggleDiff(entry); }}
+                        role="button"
+                        tabindex="0"
+                        onkeydown={(e) => (e.key === "Enter" || e.key === " ") && (e.preventDefault(), toggleDiff(entry))}
+                    >
+                        {#if loadingDiffs.has(entry.filePath + ":" + entry.rev)}
+                            Loading...
+                        {:else if expandedDiffs.has(entry.filePath + ":" + entry.rev)}
+                            ▼ Hide diff ({expandedDiffs.get(entry.filePath + ":" + entry.rev)?.summary})
+                        {:else}
+                            ▶ Show diff
+                        {/if}
+                    </span>
+                </div>
+                {#if expandedDiffs.has(entry.filePath + ":" + entry.rev)}
+                    <div class="team-activity-inline-diff">
+                        {@html expandedDiffs.get(entry.filePath + ":" + entry.rev)?.html ?? ""}
+                    </div>
+                {/if}
             {/each}
         {/each}
     {/if}
