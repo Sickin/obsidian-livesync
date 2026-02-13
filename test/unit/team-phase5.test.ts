@@ -109,3 +109,63 @@ describe("TeamSettingsStore", () => {
         expect(fetched!.settings.liveSync).toBeDefined();
     });
 });
+
+describe("TeamOverrideTracker", () => {
+    let tracker: any;
+
+    beforeEach(async () => {
+        const { TeamOverrideTracker } = await import(
+            "../../src/modules/features/TeamSync/TeamOverrideTracker"
+        );
+        const data = new Map<string, any>();
+        const mockStore = {
+            get: async (key: string) => data.get(key),
+            set: async (key: string, value: any) => { data.set(key, value); },
+            delete: async (key: string) => { data.delete(key); },
+        };
+        tracker = new TeamOverrideTracker(mockStore as any);
+    });
+
+    it("should report no overrides initially", async () => {
+        const result = await tracker.isOverridden("self-hosted-livesync", "liveSync");
+        expect(result).toBe(false);
+    });
+
+    it("should mark and detect an override", async () => {
+        await tracker.markOverridden("self-hosted-livesync", "liveSync");
+        expect(await tracker.isOverridden("self-hosted-livesync", "liveSync")).toBe(true);
+        expect(await tracker.isOverridden("self-hosted-livesync", "syncOnStart")).toBe(false);
+    });
+
+    it("should clear a single override", async () => {
+        await tracker.markOverridden("self-hosted-livesync", "liveSync");
+        await tracker.markOverridden("self-hosted-livesync", "syncOnStart");
+        await tracker.clearOverride("self-hosted-livesync", "liveSync");
+        expect(await tracker.isOverridden("self-hosted-livesync", "liveSync")).toBe(false);
+        expect(await tracker.isOverridden("self-hosted-livesync", "syncOnStart")).toBe(true);
+    });
+
+    it("should list all overrides for a plugin", async () => {
+        await tracker.markOverridden("self-hosted-livesync", "a");
+        await tracker.markOverridden("self-hosted-livesync", "b");
+        const overrides = await tracker.getOverrides("self-hosted-livesync");
+        expect(overrides).toEqual(expect.arrayContaining(["a", "b"]));
+        expect(overrides.length).toBe(2);
+    });
+
+    it("should clear all overrides for a plugin", async () => {
+        await tracker.markOverridden("self-hosted-livesync", "a");
+        await tracker.markOverridden("self-hosted-livesync", "b");
+        await tracker.clearAllOverrides("self-hosted-livesync");
+        const overrides = await tracker.getOverrides("self-hosted-livesync");
+        expect(overrides.length).toBe(0);
+    });
+
+    it("should handle multiple plugins independently", async () => {
+        await tracker.markOverridden("plugin-a", "setting1");
+        await tracker.markOverridden("plugin-b", "setting2");
+        expect(await tracker.isOverridden("plugin-a", "setting1")).toBe(true);
+        expect(await tracker.isOverridden("plugin-a", "setting2")).toBe(false);
+        expect(await tracker.isOverridden("plugin-b", "setting2")).toBe(true);
+    });
+});
