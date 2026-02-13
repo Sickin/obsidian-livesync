@@ -42,6 +42,7 @@ export interface TeamAnnotation {
     };
     contextBefore: string;
     contextAfter: string;
+    selectedText: string;
     content: string;
     author: string;
     mentions: string[];

@@ -44,6 +44,7 @@ describe("AnnotationStore", () => {
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 10 },
             contextBefore: "before text",
             contextAfter: "after text",
+            selectedText: "test text",
             content: "This needs a citation",
             author: "alice",
             mentions: ["bob"],
@@ -58,7 +59,7 @@ describe("AnnotationStore", () => {
         const created = await store.create({
             filePath: "notes/test.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 10 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "test", author: "alice", mentions: [], parentId: null,
         });
         const fetched = await store.getById(created._id);
@@ -75,13 +76,13 @@ describe("AnnotationStore", () => {
         await store.create({
             filePath: "notes/a.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "note on a", author: "alice", mentions: [], parentId: null,
         });
         await store.create({
             filePath: "notes/b.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "note on b", author: "alice", mentions: [], parentId: null,
         });
         const results = await store.getByFile("notes/a.md");
@@ -93,7 +94,7 @@ describe("AnnotationStore", () => {
         const created = await store.create({
             filePath: "notes/test.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "test", author: "alice", mentions: [], parentId: null,
         });
         const resolved = await store.resolve(created._id);
@@ -106,7 +107,7 @@ describe("AnnotationStore", () => {
         const created = await store.create({
             filePath: "notes/test.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "original", author: "alice", mentions: [], parentId: null,
         });
         await store.update(created._id, { content: "edited" });
@@ -118,13 +119,13 @@ describe("AnnotationStore", () => {
         await store.create({
             filePath: "notes/a.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "hey @bob", author: "alice", mentions: ["bob"], parentId: null,
         });
         await store.create({
             filePath: "notes/b.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "hey @charlie", author: "alice", mentions: ["charlie"], parentId: null,
         });
         const results = await store.getByMention("bob");
@@ -136,13 +137,13 @@ describe("AnnotationStore", () => {
         const parent = await store.create({
             filePath: "notes/a.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "parent", author: "alice", mentions: [], parentId: null,
         });
         await store.create({
             filePath: "notes/a.md",
             range: { startLine: 1, startChar: 0, endLine: 1, endChar: 5 },
-            contextBefore: "", contextAfter: "",
+            contextBefore: "", contextAfter: "", selectedText: "",
             content: "reply", author: "bob", mentions: [], parentId: parent._id,
         });
         const replies = await store.getReplies(parent._id);

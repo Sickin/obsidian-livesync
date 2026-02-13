@@ -17,6 +17,7 @@ export class AnnotationStore {
             range: input.range,
             contextBefore: input.contextBefore,
             contextAfter: input.contextAfter,
+            selectedText: input.selectedText,
             content: input.content,
             author: input.author,
             mentions: input.mentions,

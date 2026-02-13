@@ -482,7 +482,7 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             if (ann.parentId) continue; // Skip replies
 
             const anchor: AnchorContext = {
-                selectedText: "",
+                selectedText: ann.selectedText ?? "",
                 contextBefore: ann.contextBefore,
                 contextAfter: ann.contextAfter,
                 originalRange: ann.range,
@@ -545,6 +545,7 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             range,
             contextBefore: ctx.contextBefore,
             contextAfter: ctx.contextAfter,
+            selectedText: ctx.selectedText,
             content: noteContent,
             author: this.getCurrentUsername(),
             mentions,
