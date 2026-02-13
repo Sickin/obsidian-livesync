@@ -9,12 +9,27 @@ import { CouchDBUserManager } from "./CouchDBUserManager.ts";
 import { TeamValidation } from "./ValidationFunction.ts";
 import { ReadStateManager } from "./ReadStateManager.ts";
 import { ChangeTracker } from "./ChangeTracker.ts";
-import { EVENT_TEAM_FILE_CHANGED, EVENT_TEAM_FILE_READ, EVENT_TEAM_ACTIVITY_UPDATED } from "./events.ts";
+import {
+    EVENT_TEAM_FILE_CHANGED,
+    EVENT_TEAM_FILE_READ,
+    EVENT_TEAM_ACTIVITY_UPDATED,
+    EVENT_TEAM_ANNOTATION_CREATED,
+    EVENT_TEAM_ANNOTATION_RESOLVED,
+} from "./events.ts";
 import { eventHub } from "../../../common/events.ts";
 import { TeamFileDecorator } from "./TeamFileDecorator.ts";
 import { TeamActivityView, VIEW_TYPE_TEAM_ACTIVITY } from "./TeamActivityView.ts";
 import { TeamDiffView, VIEW_TYPE_TEAM_DIFF, type TeamDiffViewState } from "./TeamDiffView.ts";
 import { getDocData } from "../../../lib/src/common/utils.ts";
+import { AnnotationStore } from "./AnnotationStore.ts";
+import { TextAnchor, type AnchorContext } from "./TextAnchor.ts";
+import {
+    createAnnotationExtension,
+    setAnnotationsEffect,
+    type EditorAnnotation,
+} from "./AnnotationExtension.ts";
+import { TeamNotesView, VIEW_TYPE_TEAM_NOTES } from "./TeamNotesView.ts";
+import type { TeamAnnotation } from "./types.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
@@ -22,6 +37,8 @@ export class ModuleTeamSync extends AbstractObsidianModule {
     readStateManager: ReadStateManager | undefined;
     changeTracker: ChangeTracker | undefined;
     private _fileDecorator: TeamFileDecorator | undefined;
+    annotationStore: AnnotationStore | undefined;
+    private _annotationExtension: any[] | undefined;
 
     /**
      * Whether team mode is currently enabled.
@@ -86,6 +103,9 @@ export class ModuleTeamSync extends AbstractObsidianModule {
 
             // Initialize change tracker
             this.changeTracker = new ChangeTracker(this.getCurrentUsername());
+
+            // Initialize annotation store
+            this.annotationStore = new AnnotationStore(this.localDatabase);
         }
         return true;
     }
@@ -111,6 +131,17 @@ export class ModuleTeamSync extends AbstractObsidianModule {
         }
 
         eventHub.emitEvent(EVENT_TEAM_ACTIVITY_UPDATED, undefined);
+
+        // Handle annotation documents arriving from remote
+        const docId = (entry as any)._id as string | undefined;
+        if (docId && docId.startsWith("team:annotation:")) {
+            eventHub.emitEvent(EVENT_TEAM_ANNOTATION_CREATED, undefined as any);
+            const activeFile = this.app.workspace.getActiveFile();
+            if (activeFile) {
+                void this._refreshEditorAnnotations(activeFile.path);
+            }
+        }
+
         return true;
     }
 
@@ -257,6 +288,58 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             })
         );
 
+        // Register CM6 annotation extension
+        this._annotationExtension = createAnnotationExtension() as any[];
+        this.plugin.registerEditorExtension(this._annotationExtension as any);
+
+        // Refresh annotations when a file opens
+        this.plugin.registerEvent(
+            this.app.workspace.on("file-open", (file) => {
+                if (file && this.annotationStore) {
+                    void this._refreshEditorAnnotations(file.path);
+                }
+            })
+        );
+
+        // Editor context menu: "Add Team Note"
+        this.plugin.registerEvent(
+            this.app.workspace.on("editor-menu", (menu: any, editor: any, info: any) => {
+                if (!this.isTeamModeEnabled() || !this.annotationStore) return;
+                const selection = editor.getSelection();
+                if (!selection) return;
+
+                menu.addItem((item: any) => {
+                    item.setTitle("Add Team Note")
+                        .setIcon("message-square")
+                        .onClick(() => {
+                            void this._createAnnotationFromSelection(editor, info);
+                        });
+                });
+            })
+        );
+
+        // Register Team Notes sidebar view
+        this.registerView(VIEW_TYPE_TEAM_NOTES, (leaf) => {
+            if (!this.annotationStore) {
+                throw new Error("Team Notes view requires annotation store initialization.");
+            }
+            return new TeamNotesView(
+                leaf,
+                this.plugin,
+                this.annotationStore,
+                this.getCurrentUsername(),
+                (ann) => this._openAnnotationInFile(ann)
+            );
+        });
+
+        this.addCommand({
+            id: "show-team-notes",
+            name: "Show Team Notes",
+            callback: () => {
+                void this.services.API.showWindow(VIEW_TYPE_TEAM_NOTES);
+            },
+        });
+
         return Promise.resolve(true);
     }
 
@@ -383,6 +466,147 @@ export class ModuleTeamSync extends AbstractObsidianModule {
                 (containerEl as any).__teamPaneCleanup();
             }
         };
+    }
+
+    private async _refreshEditorAnnotations(filePath: string): Promise<void> {
+        if (!this.annotationStore) return;
+
+        const annotations = await this.annotationStore.getByFile(filePath);
+        const file = this.app.vault.getAbstractFileByPath(filePath);
+        if (!file) return;
+
+        const content = await this.app.vault.cachedRead(file as any);
+
+        const editorAnnotations: EditorAnnotation[] = [];
+        for (const ann of annotations) {
+            if (ann.parentId) continue; // Skip replies
+
+            const anchor: AnchorContext = {
+                selectedText: "",
+                contextBefore: ann.contextBefore,
+                contextAfter: ann.contextAfter,
+                originalRange: ann.range,
+            };
+
+            const newRange = TextAnchor.findAnchor(content, anchor);
+            const range = newRange ?? ann.range;
+
+            const replies = await this.annotationStore.getReplies(ann._id);
+
+            editorAnnotations.push({
+                id: ann._id,
+                range,
+                content: ann.content,
+                author: ann.author,
+                resolved: ann.resolved,
+                replyCount: replies.length,
+            });
+        }
+
+        const leaf = this.app.workspace.getMostRecentLeaf();
+        if (leaf?.view && "editor" in leaf.view) {
+            const editorView = (leaf.view as any).editor?.cm;
+            if (editorView) {
+                editorView.dispatch({
+                    effects: setAnnotationsEffect.of(editorAnnotations),
+                });
+            }
+        }
+    }
+
+    private async _createAnnotationFromSelection(
+        editor: any,
+        info: any
+    ): Promise<void> {
+        if (!this.annotationStore) return;
+
+        const filePath = info?.file?.path;
+        if (!filePath) return;
+
+        const from = editor.getCursor("from");
+        const to = editor.getCursor("to");
+        const range = {
+            startLine: from.line,
+            startChar: from.ch,
+            endLine: to.line,
+            endChar: to.ch,
+        };
+
+        const fileContent = await this.app.vault.cachedRead(info.file as any);
+        const ctx = TextAnchor.captureContext(fileContent, range);
+
+        const noteContent = await this._promptForAnnotation();
+        if (!noteContent) return;
+
+        const mentions = (noteContent.match(/@(\w+)/g) ?? []).map((m: string) => m.slice(1));
+
+        const annotation = await this.annotationStore.create({
+            filePath,
+            range,
+            contextBefore: ctx.contextBefore,
+            contextAfter: ctx.contextAfter,
+            content: noteContent,
+            author: this.getCurrentUsername(),
+            mentions,
+            parentId: null,
+        });
+
+        eventHub.emitEvent(EVENT_TEAM_ANNOTATION_CREATED, annotation);
+        void this._refreshEditorAnnotations(filePath);
+    }
+
+    private _promptForAnnotation(): Promise<string | null> {
+        return new Promise((resolve) => {
+            // Use Obsidian's Modal API
+            const { Modal } = require("obsidian");
+            const modal = new (class extends Modal {
+                result: string | null = null;
+                onOpen() {
+                    const { contentEl } = this;
+                    contentEl.createEl("h4", { text: "Add Team Note" });
+                    const input = contentEl.createEl("textarea", {
+                        attr: {
+                            placeholder: "Type your note... Use @username to mention",
+                            rows: "4",
+                            style: "width: 100%;",
+                        },
+                    });
+                    const btnContainer = contentEl.createDiv({ cls: "modal-button-container" });
+                    btnContainer.createEl("button", { text: "Cancel" }).addEventListener("click", () => {
+                        this.result = null;
+                        this.close();
+                    });
+                    btnContainer.createEl("button", { text: "Add Note", cls: "mod-cta" }).addEventListener("click", () => {
+                        this.result = (input as HTMLTextAreaElement).value;
+                        this.close();
+                    });
+                }
+                onClose() {
+                    resolve(this.result);
+                }
+            })(this.app);
+            modal.open();
+        });
+    }
+
+    private async _openAnnotationInFile(annotation: TeamAnnotation): Promise<void> {
+        const file = this.app.vault.getAbstractFileByPath(annotation.filePath);
+        if (!file) return;
+        const leaf = this.app.workspace.getLeaf(false);
+        await (leaf as any).openFile(file);
+
+        const view = leaf.view;
+        if (view && "editor" in view) {
+            const editor = (view as any).editor;
+            editor.setCursor({ line: annotation.range.startLine, ch: annotation.range.startChar });
+            editor.scrollIntoView(
+                {
+                    from: { line: annotation.range.startLine, ch: 0 },
+                    to: { line: annotation.range.endLine, ch: 0 },
+                },
+                true
+            );
+        }
     }
 
     onBindFunction(core: LiveSyncCore, services: typeof core.services): void {
