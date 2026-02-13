@@ -510,6 +510,11 @@ export class ModuleTeamSync extends AbstractObsidianModule {
 
             (containerEl as any).__teamPaneCleanup = () => unmount(component);
 
+            // Show enforced settings notice for non-admin members
+            if (!this.isCurrentUserAdmin() && this._teamConfig?.features.settingsPush) {
+                this.addEnforcedSettingsNotice(containerEl);
+            }
+
             // Mount admin settings manager if admin and settingsPush enabled
             if (this.isCurrentUserAdmin() && this._teamConfig?.features.settingsPush && this.settingsStore) {
                 const { default: TeamSettingsManagerPane } = await import("./TeamSettingsManagerPane.svelte");
@@ -583,6 +588,19 @@ export class ModuleTeamSync extends AbstractObsidianModule {
 
     getEnforcedSettings(pluginId: string): Set<string> {
         return this._enforcedSettings.get(pluginId) ?? new Set();
+    }
+
+    /**
+     * Add a notice banner to the settings dialog showing how many settings
+     * are managed by the team admin. Called for non-admin users.
+     */
+    addEnforcedSettingsNotice(containerEl: HTMLElement): void {
+        const enforcedKeys = this._enforcedSettings.get("self-hosted-livesync");
+        if (!enforcedKeys?.size) return;
+
+        const notice = containerEl.createDiv({ cls: "team-settings-notice" });
+        notice.createEl("strong", { text: "Team-managed settings: " });
+        notice.appendText(`${enforcedKeys.size} setting(s) are managed by your team admin and cannot be changed.`);
     }
 
     private async _refreshEditorAnnotations(filePath: string): Promise<void> {
