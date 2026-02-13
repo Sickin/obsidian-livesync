@@ -127,6 +127,8 @@ const externals = [
     "obsidian",
     "electron",
     "crypto",
+    "net",
+    "tls",
     "@codemirror/autocomplete",
     "@codemirror/collab",
     "@codemirror/commands",
