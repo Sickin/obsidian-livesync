@@ -87,3 +87,52 @@ describe("WebhookChannel", () => {
         expect(fetchSpy).not.toHaveBeenCalled();
     });
 });
+
+describe("SmtpChannel", () => {
+    it("should build email content with correct headers", async () => {
+        const { SmtpChannel } = await import(
+            "../../src/modules/features/TeamSync/SmtpChannel"
+        );
+        const channel = new SmtpChannel();
+        const email = channel.buildEmail({
+            from: "team@example.com",
+            to: "bob@example.com",
+            subject: "New mention in LiveSync",
+            body: "Alice mentioned you in notes/test.md",
+        });
+        expect(email).toContain("From: team@example.com");
+        expect(email).toContain("To: bob@example.com");
+        expect(email).toContain("Subject: New mention in LiveSync");
+        expect(email).toContain("Alice mentioned you");
+    });
+
+    it("should format notification as email subject and body", async () => {
+        const { SmtpChannel } = await import(
+            "../../src/modules/features/TeamSync/SmtpChannel"
+        );
+        const channel = new SmtpChannel();
+        const { subject, body } = channel.formatNotification({
+            type: "mention" as const,
+            title: "New mention",
+            body: "Alice mentioned you in notes/test.md",
+            actor: "alice",
+            targets: ["bob"],
+            timestamp: "2026-02-12T10:00:00Z",
+        });
+        expect(subject).toContain("LiveSync");
+        expect(body).toContain("Alice mentioned you");
+    });
+
+    it("should return false when SMTP is disabled", async () => {
+        const { SmtpChannel } = await import(
+            "../../src/modules/features/TeamSync/SmtpChannel"
+        );
+        const channel = new SmtpChannel();
+        const result = await channel.send(
+            { host: "", port: 587, secure: false, username: "", password: "", fromAddress: "", enabled: false },
+            "bob@example.com",
+            { type: "mention" as const, title: "T", body: "B", actor: "a", targets: ["b"], timestamp: "2026-02-12T10:00:00Z" },
+        );
+        expect(result).toBe(false);
+    });
+});
