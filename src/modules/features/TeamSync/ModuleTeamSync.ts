@@ -41,7 +41,6 @@ import { NotificationStore } from "./NotificationStore.ts";
 import { NotificationService } from "./NotificationService.ts";
 import { WebhookChannel } from "./WebhookChannel.ts";
 import { SmtpChannel } from "./SmtpChannel.ts";
-import { EVENT_TEAM_NOTIFICATION_SENT, EVENT_TEAM_NOTIFICATION_FAILED } from "./events.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
@@ -620,17 +619,31 @@ export class ModuleTeamSync extends AbstractObsidianModule {
                             });
                         },
                         onTest: async (channel: string) => {
-                            if (!this.notificationService) return false;
+                            const testNotification = {
+                                type: "mention" as const,
+                                title: "Test Notification",
+                                body: "This is a test notification from LiveSync Team.",
+                                actor: this.getCurrentUsername(),
+                                targets: [this.getCurrentUsername()],
+                                timestamp: new Date().toISOString(),
+                            };
                             try {
-                                await this.notificationService.dispatch({
-                                    type: "mention",
-                                    title: "Test Notification",
-                                    body: "This is a test notification from LiveSync Team.",
-                                    actor: this.getCurrentUsername(),
-                                    targets: [this.getCurrentUsername()],
-                                    timestamp: new Date().toISOString(),
-                                });
-                                return true;
+                                if (channel === "smtp") {
+                                    const config = await this.notificationStore!.getConfig();
+                                    if (!config?.smtp?.enabled) return false;
+                                    const smtpChannel = new SmtpChannel();
+                                    const prefs = await this.notificationStore!.getPrefs(this.getCurrentUsername());
+                                    const email = prefs?.email;
+                                    if (!email) return false;
+                                    return await smtpChannel.send(config.smtp, email, testNotification);
+                                } else {
+                                    const config = await this.notificationStore!.getConfig();
+                                    if (!config?.webhooks?.length) return false;
+                                    const webhookChannel = new WebhookChannel();
+                                    const enabled = config.webhooks.filter(w => w.enabled);
+                                    if (!enabled.length) return false;
+                                    return await webhookChannel.send(enabled[0], testNotification);
+                                }
                             } catch { return false; }
                         },
                     },

@@ -32,19 +32,25 @@ export class SmtpChannel {
         ].join("\r\n");
     }
 
+    private _sanitizeAddress(address: string): string {
+        return address.replace(/[\r\n>]/g, "");
+    }
+
     async send(config: SmtpConfig, toAddress: string, notification: TeamNotification): Promise<boolean> {
         if (!config.enabled) return false;
 
         try {
+            const safeTo = this._sanitizeAddress(toAddress);
+            const safeFrom = this._sanitizeAddress(config.fromAddress);
             const { subject, body } = this.formatNotification(notification);
             const emailData = this.buildEmail({
-                from: config.fromAddress,
-                to: toAddress,
+                from: safeFrom,
+                to: safeTo,
                 subject,
                 body,
             });
 
-            return await this._sendViaSMTP(config, toAddress, emailData);
+            return await this._sendViaSMTP(config, safeTo, emailData);
         } catch {
             return false;
         }
@@ -55,24 +61,36 @@ export class SmtpChannel {
         const tls = require("tls") as typeof import("tls");
 
         return new Promise((resolve) => {
-            const timeout = setTimeout(() => {
+            let done = false;
+
+            const finish = (success: boolean) => {
+                if (done) return;
+                done = true;
+                clearTimeout(timeout);
                 socket?.destroy();
-                resolve(false);
-            }, 15_000);
+                resolve(success);
+            };
+
+            const timeout = setTimeout(() => finish(false), 15_000);
 
             let socket: any;
             let step = 0;
 
             const onData = (data: Buffer) => {
+                if (done) return;
                 const response = data.toString();
                 const code = parseInt(response.slice(0, 3));
 
+                // SMTP multiline responses use dash at position 3 (e.g. "250-AUTH")
+                // Wait for the final line (space at position 3) before advancing
+                if (step === 1 && response.charAt(3) === "-") return;
+
                 if (step === 0) {
-                    if (code !== 220) { cleanup(false); return; }
+                    if (code !== 220) { finish(false); return; }
                     send(`EHLO localhost`);
                     step = 1;
                 } else if (step === 1) {
-                    if (code !== 250) { cleanup(false); return; }
+                    if (code !== 250) { finish(false); return; }
                     if (config.username) {
                         send(`AUTH LOGIN`);
                         step = 2;
@@ -81,43 +99,37 @@ export class SmtpChannel {
                         step = 5;
                     }
                 } else if (step === 2) {
-                    if (code !== 334) { cleanup(false); return; }
+                    if (code !== 334) { finish(false); return; }
                     send(Buffer.from(config.username).toString("base64"));
                     step = 3;
                 } else if (step === 3) {
-                    if (code !== 334) { cleanup(false); return; }
+                    if (code !== 334) { finish(false); return; }
                     send(Buffer.from(config.password).toString("base64"));
                     step = 4;
                 } else if (step === 4) {
-                    if (code !== 235) { cleanup(false); return; }
+                    if (code !== 235) { finish(false); return; }
                     send(`MAIL FROM:<${config.fromAddress}>`);
                     step = 5;
                 } else if (step === 5) {
-                    if (code !== 250) { cleanup(false); return; }
+                    if (code !== 250) { finish(false); return; }
                     send(`RCPT TO:<${toAddress}>`);
                     step = 6;
                 } else if (step === 6) {
-                    if (code !== 250) { cleanup(false); return; }
+                    if (code !== 250) { finish(false); return; }
                     send(`DATA`);
                     step = 7;
                 } else if (step === 7) {
-                    if (code !== 354) { cleanup(false); return; }
+                    if (code !== 354) { finish(false); return; }
                     send(`${emailData}\r\n.`);
                     step = 8;
                 } else if (step === 8) {
                     send(`QUIT`);
-                    cleanup(code === 250);
+                    finish(code === 250);
                 }
             };
 
             const send = (cmd: string) => {
                 socket?.write(cmd + "\r\n");
-            };
-
-            const cleanup = (success: boolean) => {
-                clearTimeout(timeout);
-                socket?.destroy();
-                resolve(success);
             };
 
             if (config.secure) {
@@ -127,8 +139,8 @@ export class SmtpChannel {
             }
 
             socket.on("data", onData);
-            socket.on("error", () => cleanup(false));
-            socket.on("timeout", () => cleanup(false));
+            socket.on("error", () => finish(false));
+            socket.on("timeout", () => finish(false));
             socket.setTimeout(15_000);
         });
     }
