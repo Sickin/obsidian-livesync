@@ -228,3 +228,56 @@ describe("TextAnchor", () => {
         });
     });
 });
+
+describe("Phase 4 Integration", () => {
+    it("should export AnnotationStore with all methods", async () => {
+        const { AnnotationStore } = await import(
+            "../../src/modules/features/TeamSync/AnnotationStore"
+        );
+        const methods = ["create", "getById", "getByFile", "getByMention", "getReplies", "update", "resolve"];
+        for (const m of methods) {
+            expect(typeof AnnotationStore.prototype[m]).toBe("function");
+        }
+    });
+
+    it("should export TextAnchor with all methods", async () => {
+        const { TextAnchor } = await import(
+            "../../src/modules/features/TeamSync/TextAnchor"
+        );
+        expect(typeof TextAnchor.captureContext).toBe("function");
+        expect(typeof TextAnchor.findAnchor).toBe("function");
+    });
+
+    it("should export CM6 extension factory", async () => {
+        const { createAnnotationExtension, setAnnotationsEffect, clearAnnotationsEffect } = await import(
+            "../../src/modules/features/TeamSync/AnnotationExtension"
+        );
+        expect(typeof createAnnotationExtension).toBe("function");
+        expect(setAnnotationsEffect).toBeDefined();
+        expect(clearAnnotationsEffect).toBeDefined();
+    });
+
+    it("should export Team Notes view constants", async () => {
+        const { VIEW_TYPE_TEAM_NOTES } = await import(
+            "../../src/modules/features/TeamSync/TeamNotesView"
+        );
+        expect(VIEW_TYPE_TEAM_NOTES).toBe("team-notes");
+    });
+
+    it("should compute context and re-anchor correctly end-to-end", () => {
+        const original = "The quick brown fox jumps over the lazy dog";
+        const range = { startLine: 0, startChar: 10, endLine: 0, endChar: 19 };
+        const ctx = TextAnchor.captureContext(original, range);
+        expect(ctx.selectedText).toBe("brown fox");
+
+        const modified = "PREFIX The quick brown fox jumps over the lazy dog";
+        const newRange = TextAnchor.findAnchor(modified, {
+            ...ctx,
+            originalRange: range,
+        });
+        expect(newRange).not.toBeNull();
+        const lines = modified.split("\n");
+        const offset = TextAnchor._toOffset(lines, newRange!.startLine, newRange!.startChar);
+        expect(modified.slice(offset, offset + 9)).toBe("brown fox");
+    });
+});
