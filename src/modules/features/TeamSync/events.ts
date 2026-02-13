@@ -9,6 +9,8 @@ declare global {
         "team-annotation-created": TeamAnnotation;
         "team-annotation-updated": TeamAnnotation;
         "team-annotation-resolved": TeamAnnotation;
+        "team-settings-applied": { pluginId: string; enforced: string[] };
+        "team-settings-changed": { pluginId: string };
     }
 }
 
@@ -18,3 +20,5 @@ export const EVENT_TEAM_ACTIVITY_UPDATED = "team-activity-updated" as const;
 export const EVENT_TEAM_ANNOTATION_CREATED = "team-annotation-created" as const;
 export const EVENT_TEAM_ANNOTATION_UPDATED = "team-annotation-updated" as const;
 export const EVENT_TEAM_ANNOTATION_RESOLVED = "team-annotation-resolved" as const;
+export const EVENT_TEAM_SETTINGS_APPLIED = "team-settings-applied" as const;
+export const EVENT_TEAM_SETTINGS_CHANGED = "team-settings-changed" as const;

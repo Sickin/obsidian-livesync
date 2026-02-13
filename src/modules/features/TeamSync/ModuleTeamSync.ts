@@ -15,6 +15,9 @@ import {
     EVENT_TEAM_ACTIVITY_UPDATED,
     EVENT_TEAM_ANNOTATION_CREATED,
     EVENT_TEAM_ANNOTATION_RESOLVED,
+    EVENT_TEAM_ANNOTATION_UPDATED,
+    EVENT_TEAM_SETTINGS_APPLIED,
+    EVENT_TEAM_SETTINGS_CHANGED,
 } from "./events.ts";
 import { eventHub } from "../../../common/events.ts";
 import { TeamFileDecorator } from "./TeamFileDecorator.ts";
@@ -30,6 +33,10 @@ import {
 } from "./AnnotationExtension.ts";
 import { TeamNotesView, VIEW_TYPE_TEAM_NOTES } from "./TeamNotesView.ts";
 import type { TeamAnnotation } from "./types.ts";
+import { TeamSettingsStore } from "./TeamSettingsStore.ts";
+import { TeamOverrideTracker } from "./TeamOverrideTracker.ts";
+import { TeamSettingsApplier } from "./TeamSettingsApplier.ts";
+import { EVENT_SETTING_SAVED } from "../../../lib/src/events/coreEvents.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
@@ -39,6 +46,10 @@ export class ModuleTeamSync extends AbstractObsidianModule {
     private _fileDecorator: TeamFileDecorator | undefined;
     annotationStore: AnnotationStore | undefined;
     private _annotationExtension: any[] | undefined;
+    settingsStore: TeamSettingsStore | undefined;
+    overrideTracker: TeamOverrideTracker | undefined;
+    settingsApplier: TeamSettingsApplier | undefined;
+    private _enforcedSettings = new Map<string, Set<string>>();
 
     /**
      * Whether team mode is currently enabled.
@@ -106,6 +117,21 @@ export class ModuleTeamSync extends AbstractObsidianModule {
 
             // Initialize annotation store
             this.annotationStore = new AnnotationStore(this.localDatabase);
+
+            // Initialize settings governance stores
+            this.settingsStore = new TeamSettingsStore(this.localDatabase);
+            const overrideStore = this.services.database.openSimpleStore<any>("team-overrides");
+            this.overrideTracker = new TeamOverrideTracker(overrideStore);
+            this.settingsApplier = new TeamSettingsApplier(this.overrideTracker);
+
+            // Apply team settings on initial load
+            if (this._teamConfig?.features.settingsPush && !this.isCurrentUserAdmin()) {
+                const entries = await this.settingsStore.getAllEntries();
+                for (const entry of entries) {
+                    const pluginId = entry._id.replace("team:settings:", "");
+                    await this._applyTeamSettings(pluginId);
+                }
+            }
         }
         return true;
     }
@@ -132,14 +158,22 @@ export class ModuleTeamSync extends AbstractObsidianModule {
 
         eventHub.emitEvent(EVENT_TEAM_ACTIVITY_UPDATED, undefined);
 
-        // Handle annotation documents arriving from remote
         const docId = (entry as any)._id as string | undefined;
+
+        // Handle annotation documents arriving from remote
         if (docId && docId.startsWith("team:annotation:")) {
             eventHub.emitEvent(EVENT_TEAM_ANNOTATION_CREATED, undefined as any);
             const activeFile = this.app.workspace.getActiveFile();
             if (activeFile) {
                 void this._refreshEditorAnnotations(activeFile.path);
             }
+        }
+
+        // Handle team settings documents arriving from remote
+        if (docId && docId.startsWith("team:settings:")) {
+            const pluginId = docId.replace("team:settings:", "");
+            eventHub.emitEvent(EVENT_TEAM_SETTINGS_CHANGED, { pluginId });
+            void this._applyTeamSettings(pluginId);
         }
 
         return true;
@@ -340,6 +374,27 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             },
         });
 
+        // Listen for setting changes to detect member customizations
+        const offSettingSaved = eventHub.onEvent(EVENT_SETTING_SAVED, async (settings: any) => {
+            try {
+                if (!this._teamConfig?.features.settingsPush) return;
+                if (this.isCurrentUserAdmin()) return;
+                if (!this.settingsStore || !this.settingsApplier) return;
+
+                const entry = await this.settingsStore.getEntry("self-hosted-livesync");
+                if (!entry) return;
+
+                for (const key of Object.keys(entry.settings)) {
+                    if (entry.settings[key].mode === "default") {
+                        await this.settingsApplier.detectCustomization(entry, key, (settings as any)[key]);
+                    }
+                }
+            } catch (e) {
+                this._log(`Failed to detect setting customization: ${e}`, LOG_LEVEL_INFO);
+            }
+        });
+        this.plugin.register(offSettingSaved);
+
         return Promise.resolve(true);
     }
 
@@ -459,6 +514,41 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             });
 
             (containerEl as any).__teamPaneCleanup = () => unmount(component);
+
+            // Show enforced settings notice for non-admin members
+            if (!this.isCurrentUserAdmin() && this._teamConfig?.features.settingsPush) {
+                this.addEnforcedSettingsNotice(containerEl);
+            }
+
+            // Mount admin settings manager if admin and settingsPush enabled
+            if (this.isCurrentUserAdmin() && this._teamConfig?.features.settingsPush && this.settingsStore) {
+                const { default: TeamSettingsManagerPane } = await import("./TeamSettingsManagerPane.svelte");
+                const settingsContainer = containerEl.createDiv();
+                const settingKeys = Object.keys(this.settings).filter(
+                    (k) => !k.startsWith("_") && k !== "configPassphrase" && k !== "couchDB_PASSWORD"
+                );
+                const settingsComponent = mount(TeamSettingsManagerPane, {
+                    target: settingsContainer,
+                    props: {
+                        settingKeys,
+                        getEntry: () => this.settingsStore!.getEntry("self-hosted-livesync"),
+                        getCurrentSettings: () => ({ ...this.settings } as Record<string, unknown>),
+                        onSave: async (partial: any) => {
+                            const entry = {
+                                _id: "team:settings:self-hosted-livesync" as `team:settings:${string}`,
+                                ...partial,
+                                managedBy: this.getCurrentUsername(),
+                            };
+                            await this.settingsStore!.saveEntry(entry as any);
+                        },
+                    },
+                });
+                const origCleanup = (containerEl as any).__teamPaneCleanup;
+                (containerEl as any).__teamPaneCleanup = () => {
+                    origCleanup?.();
+                    unmount(settingsComponent);
+                };
+            }
         });
 
         return () => {
@@ -466,6 +556,60 @@ export class ModuleTeamSync extends AbstractObsidianModule {
                 (containerEl as any).__teamPaneCleanup();
             }
         };
+    }
+
+    private async _applyTeamSettings(pluginId: string): Promise<void> {
+        if (!this._teamConfig?.features.settingsPush) return;
+        if (this.isCurrentUserAdmin()) return;
+        if (!this.settingsStore || !this.settingsApplier) return;
+        if (pluginId !== "self-hosted-livesync") return;
+
+        try {
+            const entry = await this.settingsStore.getEntry(pluginId);
+            if (!entry) return;
+
+            const currentSettings = { ...this.settings } as Record<string, unknown>;
+            const result = await this.settingsApplier.apply(entry, currentSettings);
+
+            let changed = false;
+            for (const key of Object.keys(entry.settings)) {
+                const value = result.applied[key];
+                if ((this.settings as any)[key] !== value) {
+                    (this.settings as any)[key] = value;
+                    changed = true;
+                }
+            }
+
+            this._enforcedSettings.set(pluginId, new Set(result.enforced));
+
+            if (changed) {
+                await this.plugin.saveSettings();
+            }
+
+            eventHub.emitEvent(EVENT_TEAM_SETTINGS_APPLIED, {
+                pluginId,
+                enforced: result.enforced,
+            });
+        } catch (e) {
+            this._log(`Failed to apply team settings for ${pluginId}: ${e}`, LOG_LEVEL_INFO);
+        }
+    }
+
+    getEnforcedSettings(pluginId: string): Set<string> {
+        return this._enforcedSettings.get(pluginId) ?? new Set();
+    }
+
+    /**
+     * Add a notice banner to the settings dialog showing how many settings
+     * are managed by the team admin. Called for non-admin users.
+     */
+    addEnforcedSettingsNotice(containerEl: HTMLElement): void {
+        const enforcedKeys = this._enforcedSettings.get("self-hosted-livesync");
+        if (!enforcedKeys?.size) return;
+
+        const notice = containerEl.createDiv({ cls: "team-settings-notice" });
+        notice.createEl("strong", { text: "Team-managed settings: " });
+        notice.appendText(`${enforcedKeys.size} setting(s) are managed by your team admin and cannot be changed.`);
     }
 
     private async _refreshEditorAnnotations(filePath: string): Promise<void> {
