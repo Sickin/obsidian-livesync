@@ -376,3 +376,84 @@ describe("NotificationService", () => {
         expect(webhookSendCalls.length).toBe(2);
     });
 });
+
+describe("Phase 6 Integration", () => {
+    it("should export WebhookChannel with send and formatPayload", async () => {
+        const { WebhookChannel } = await import(
+            "../../src/modules/features/TeamSync/WebhookChannel"
+        );
+        expect(typeof WebhookChannel.prototype.send).toBe("function");
+        expect(typeof WebhookChannel.prototype.formatPayload).toBe("function");
+    });
+
+    it("should export SmtpChannel with send, buildEmail, formatNotification", async () => {
+        const { SmtpChannel } = await import(
+            "../../src/modules/features/TeamSync/SmtpChannel"
+        );
+        expect(typeof SmtpChannel.prototype.send).toBe("function");
+        expect(typeof SmtpChannel.prototype.buildEmail).toBe("function");
+        expect(typeof SmtpChannel.prototype.formatNotification).toBe("function");
+    });
+
+    it("should export NotificationStore with all methods", async () => {
+        const { NotificationStore } = await import(
+            "../../src/modules/features/TeamSync/NotificationStore"
+        );
+        const methods = ["getConfig", "saveConfig", "getPrefs", "savePrefs", "getAllPrefs"];
+        for (const m of methods) {
+            expect(typeof (NotificationStore.prototype as any)[m]).toBe("function");
+        }
+    });
+
+    it("should export NotificationService with dispatch", async () => {
+        const { NotificationService } = await import(
+            "../../src/modules/features/TeamSync/NotificationService"
+        );
+        expect(typeof NotificationService.prototype.dispatch).toBe("function");
+    });
+
+    it("should export notification events", async () => {
+        const { EVENT_TEAM_NOTIFICATION_SENT, EVENT_TEAM_NOTIFICATION_FAILED } = await import(
+            "../../src/modules/features/TeamSync/events"
+        );
+        expect(EVENT_TEAM_NOTIFICATION_SENT).toBe("team-notification-sent");
+        expect(EVENT_TEAM_NOTIFICATION_FAILED).toBe("team-notification-failed");
+    });
+
+    it("should dispatch end-to-end: store config + prefs → dispatch → webhook sent", async () => {
+        const { NotificationStore } = await import("../../src/modules/features/TeamSync/NotificationStore");
+        const { NotificationService } = await import("../../src/modules/features/TeamSync/NotificationService");
+
+        const mockDB = createMockDB();
+        const notifStore = new NotificationStore({ localDatabase: mockDB } as any);
+
+        await notifStore.saveConfig({
+            _id: "team:notifications:config" as const,
+            webhooks: [{ url: "https://hooks.slack.com/test", platform: "slack" as const, enabled: true, label: "Slack" }],
+            smtp: { host: "", port: 587, secure: false, username: "", password: "", fromAddress: "", enabled: false },
+        });
+
+        await notifStore.savePrefs({
+            _id: "team:notifications:prefs:bob" as `team:notifications:prefs:${string}`,
+            username: "bob",
+            enabledEvents: ["mention"],
+            channels: { email: false, webhook: true },
+        });
+
+        const sent: any[] = [];
+        const mockWebhook = { send: async (_c: any, _n: any) => { sent.push({ _c, _n }); return true; } };
+        const mockSmtp = { send: async () => false };
+
+        const service = new NotificationService(notifStore as any, mockWebhook as any, mockSmtp as any);
+        await service.dispatch({
+            type: "mention",
+            title: "Test",
+            body: "Alice mentioned you",
+            actor: "alice",
+            targets: ["bob"],
+            timestamp: new Date().toISOString(),
+        });
+
+        expect(sent.length).toBe(1);
+    });
+});
