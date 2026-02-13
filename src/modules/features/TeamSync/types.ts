@@ -98,3 +98,59 @@ export interface TeamActivityEntry {
     timestamp: number; // mtime from document
     rev: string;
 }
+
+// ── Phase 6: Extended Notifications ───────────────────
+
+export type NotificationEventType = "mention" | "file-change" | "settings-push" | "annotation-reply";
+
+export interface TeamNotification {
+    type: NotificationEventType;
+    title: string;
+    body: string;
+    actor: string;
+    targets: string[];
+    timestamp: string;
+    metadata?: {
+        filePath?: string;
+        annotationId?: string;
+        settingKeys?: string[];
+    };
+}
+
+export type WebhookPlatform = "slack" | "discord" | "teams" | "generic";
+
+export interface WebhookConfig {
+    url: string;
+    platform: WebhookPlatform;
+    enabled: boolean;
+    label: string;
+}
+
+export interface SmtpConfig {
+    host: string;
+    port: number;
+    secure: boolean;
+    username: string;
+    password: string;
+    fromAddress: string;
+    enabled: boolean;
+}
+
+export interface TeamNotificationConfig {
+    _id: "team:notifications:config";
+    _rev?: string;
+    webhooks: WebhookConfig[];
+    smtp: SmtpConfig;
+}
+
+export interface UserNotificationPrefs {
+    _id: `team:notifications:prefs:${string}`;
+    _rev?: string;
+    username: string;
+    email?: string;
+    enabledEvents: NotificationEventType[];
+    channels: {
+        email: boolean;
+        webhook: boolean;
+    };
+}
