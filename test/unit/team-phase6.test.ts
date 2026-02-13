@@ -238,3 +238,141 @@ describe("NotificationStore", () => {
         expect(updated!.channels.email).toBe(true);
     });
 });
+
+describe("NotificationService", () => {
+    let service: any;
+    let mockNotificationStore: any;
+    let webhookSendCalls: any[];
+    let smtpSendCalls: any[];
+
+    beforeEach(async () => {
+        const { NotificationService } = await import(
+            "../../src/modules/features/TeamSync/NotificationService"
+        );
+
+        const configs = new Map<string, any>();
+        const prefs = new Map<string, any>();
+        mockNotificationStore = {
+            getConfig: async () => configs.get("config") ?? null,
+            saveConfig: async (c: any) => configs.set("config", c),
+            getPrefs: async (username: string) => prefs.get(username) ?? null,
+            savePrefs: async (p: any) => prefs.set(p.username, p),
+        };
+
+        webhookSendCalls = [];
+        smtpSendCalls = [];
+        const mockWebhookChannel = {
+            send: async (config: any, notification: any) => {
+                webhookSendCalls.push({ config, notification });
+                return true;
+            },
+        };
+        const mockSmtpChannel = {
+            send: async (config: any, to: any, notification: any) => {
+                smtpSendCalls.push({ config, to, notification });
+                return true;
+            },
+        };
+
+        service = new NotificationService(mockNotificationStore, mockWebhookChannel, mockSmtpChannel);
+    });
+
+    it("should not send when no config exists", async () => {
+        await service.dispatch({
+            type: "mention" as const, title: "T", body: "B",
+            actor: "alice", targets: ["bob"], timestamp: "2026-02-12T10:00:00Z",
+        });
+        expect(webhookSendCalls.length).toBe(0);
+        expect(smtpSendCalls.length).toBe(0);
+    });
+
+    it("should send webhook when user has webhook enabled", async () => {
+        await mockNotificationStore.saveConfig({
+            _id: "team:notifications:config",
+            webhooks: [{ url: "https://hooks.slack.com/test", platform: "slack", enabled: true, label: "Slack" }],
+            smtp: { host: "", port: 587, secure: false, username: "", password: "", fromAddress: "", enabled: false },
+        });
+        await mockNotificationStore.savePrefs({
+            _id: "team:notifications:prefs:bob", username: "bob",
+            enabledEvents: ["mention"], channels: { email: false, webhook: true },
+        });
+        await service.dispatch({
+            type: "mention" as const, title: "Mention", body: "Alice mentioned you",
+            actor: "alice", targets: ["bob"], timestamp: "2026-02-12T10:00:00Z",
+        });
+        expect(webhookSendCalls.length).toBe(1);
+        expect(smtpSendCalls.length).toBe(0);
+    });
+
+    it("should send email when user has email enabled", async () => {
+        await mockNotificationStore.saveConfig({
+            _id: "team:notifications:config",
+            webhooks: [],
+            smtp: { host: "smtp.example.com", port: 587, secure: false, username: "u", password: "p", fromAddress: "team@example.com", enabled: true },
+        });
+        await mockNotificationStore.savePrefs({
+            _id: "team:notifications:prefs:bob", username: "bob",
+            email: "bob@example.com", enabledEvents: ["mention"], channels: { email: true, webhook: false },
+        });
+        await service.dispatch({
+            type: "mention" as const, title: "Mention", body: "Alice mentioned you",
+            actor: "alice", targets: ["bob"], timestamp: "2026-02-12T10:00:00Z",
+        });
+        expect(smtpSendCalls.length).toBe(1);
+        expect(smtpSendCalls[0].to).toBe("bob@example.com");
+    });
+
+    it("should skip user when event type not in preferences", async () => {
+        await mockNotificationStore.saveConfig({
+            _id: "team:notifications:config",
+            webhooks: [{ url: "https://hooks.slack.com/test", platform: "slack", enabled: true, label: "Slack" }],
+            smtp: { host: "", port: 587, secure: false, username: "", password: "", fromAddress: "", enabled: false },
+        });
+        await mockNotificationStore.savePrefs({
+            _id: "team:notifications:prefs:bob", username: "bob",
+            enabledEvents: ["file-change"], channels: { email: false, webhook: true },
+        });
+        await service.dispatch({
+            type: "mention" as const, title: "Mention", body: "Test",
+            actor: "alice", targets: ["bob"], timestamp: "2026-02-12T10:00:00Z",
+        });
+        expect(webhookSendCalls.length).toBe(0);
+    });
+
+    it("should not notify the actor about their own action", async () => {
+        await mockNotificationStore.saveConfig({
+            _id: "team:notifications:config",
+            webhooks: [{ url: "https://hooks.slack.com/test", platform: "slack", enabled: true, label: "Slack" }],
+            smtp: { host: "", port: 587, secure: false, username: "", password: "", fromAddress: "", enabled: false },
+        });
+        await mockNotificationStore.savePrefs({
+            _id: "team:notifications:prefs:alice", username: "alice",
+            enabledEvents: ["mention"], channels: { email: false, webhook: true },
+        });
+        await service.dispatch({
+            type: "mention" as const, title: "Mention", body: "Test",
+            actor: "alice", targets: ["alice"], timestamp: "2026-02-12T10:00:00Z",
+        });
+        expect(webhookSendCalls.length).toBe(0);
+    });
+
+    it("should send to multiple webhooks", async () => {
+        await mockNotificationStore.saveConfig({
+            _id: "team:notifications:config",
+            webhooks: [
+                { url: "https://hooks.slack.com/a", platform: "slack", enabled: true, label: "A" },
+                { url: "https://hooks.slack.com/b", platform: "discord", enabled: true, label: "B" },
+            ],
+            smtp: { host: "", port: 587, secure: false, username: "", password: "", fromAddress: "", enabled: false },
+        });
+        await mockNotificationStore.savePrefs({
+            _id: "team:notifications:prefs:bob", username: "bob",
+            enabledEvents: ["mention"], channels: { email: false, webhook: true },
+        });
+        await service.dispatch({
+            type: "mention" as const, title: "Mention", body: "Test",
+            actor: "alice", targets: ["bob"], timestamp: "2026-02-12T10:00:00Z",
+        });
+        expect(webhookSendCalls.length).toBe(2);
+    });
+});
