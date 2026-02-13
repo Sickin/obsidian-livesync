@@ -169,3 +169,143 @@ describe("TeamOverrideTracker", () => {
         expect(await tracker.isOverridden("plugin-b", "setting2")).toBe(true);
     });
 });
+
+describe("TeamSettingsApplier", () => {
+    let applier: any;
+    let overrideTracker: any;
+
+    beforeEach(async () => {
+        const { TeamSettingsApplier } = await import(
+            "../../src/modules/features/TeamSync/TeamSettingsApplier"
+        );
+        const { TeamOverrideTracker } = await import(
+            "../../src/modules/features/TeamSync/TeamOverrideTracker"
+        );
+        const data = new Map<string, any>();
+        const mockStore = {
+            get: async (key: string) => data.get(key),
+            set: async (key: string, value: any) => { data.set(key, value); },
+            delete: async (key: string) => { data.delete(key); },
+        };
+        overrideTracker = new TeamOverrideTracker(mockStore as any);
+        applier = new TeamSettingsApplier(overrideTracker);
+    });
+
+    it("should apply enforced settings unconditionally", async () => {
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                liveSync: { value: true, mode: "enforced" as const },
+            },
+        };
+        const current = { liveSync: false, otherSetting: "keep" };
+        const result = await applier.apply(entry, current);
+        expect(result.applied.liveSync).toBe(true);
+        expect(result.applied.otherSetting).toBe("keep");
+        expect(result.enforced).toContain("liveSync");
+    });
+
+    it("should apply default settings when not overridden", async () => {
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                syncOnStart: { value: true, mode: "default" as const },
+            },
+        };
+        const current = { syncOnStart: false };
+        const result = await applier.apply(entry, current);
+        expect(result.applied.syncOnStart).toBe(true);
+        expect(result.enforced).not.toContain("syncOnStart");
+    });
+
+    it("should skip default settings when member has overridden", async () => {
+        await overrideTracker.markOverridden("self-hosted-livesync", "syncOnStart");
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                syncOnStart: { value: true, mode: "default" as const },
+            },
+        };
+        const current = { syncOnStart: false };
+        const result = await applier.apply(entry, current);
+        expect(result.applied.syncOnStart).toBe(false);
+    });
+
+    it("should enforce even if member has overridden", async () => {
+        await overrideTracker.markOverridden("self-hosted-livesync", "liveSync");
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                liveSync: { value: true, mode: "enforced" as const },
+            },
+        };
+        const current = { liveSync: false };
+        const result = await applier.apply(entry, current);
+        expect(result.applied.liveSync).toBe(true);
+    });
+
+    it("should return list of enforced keys", async () => {
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                liveSync: { value: true, mode: "enforced" as const },
+                syncOnStart: { value: true, mode: "default" as const },
+                batchSave: { value: false, mode: "enforced" as const },
+            },
+        };
+        const current = { liveSync: false, syncOnStart: false, batchSave: true };
+        const result = await applier.apply(entry, current);
+        expect(result.enforced).toEqual(expect.arrayContaining(["liveSync", "batchSave"]));
+        expect(result.enforced).not.toContain("syncOnStart");
+    });
+
+    it("should detect when member customizes a default setting", async () => {
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                syncOnStart: { value: true, mode: "default" as const },
+            },
+        };
+        await applier.detectCustomization(entry, "syncOnStart", false);
+        expect(await overrideTracker.isOverridden("self-hosted-livesync", "syncOnStart")).toBe(true);
+    });
+
+    it("should not mark as override when value matches team default", async () => {
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                syncOnStart: { value: true, mode: "default" as const },
+            },
+        };
+        await applier.detectCustomization(entry, "syncOnStart", true);
+        expect(await overrideTracker.isOverridden("self-hosted-livesync", "syncOnStart")).toBe(false);
+    });
+
+    it("should clear override when member resets to team default", async () => {
+        await overrideTracker.markOverridden("self-hosted-livesync", "syncOnStart");
+        const entry = {
+            _id: "team:settings:self-hosted-livesync" as const,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                syncOnStart: { value: true, mode: "default" as const },
+            },
+        };
+        await applier.detectCustomization(entry, "syncOnStart", true);
+        expect(await overrideTracker.isOverridden("self-hosted-livesync", "syncOnStart")).toBe(false);
+    });
+});
