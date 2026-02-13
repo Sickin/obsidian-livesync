@@ -1,5 +1,31 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 
+function createMockDB() {
+    const docs = new Map<string, any>();
+    return {
+        get: async (id: string) => {
+            const doc = docs.get(id);
+            if (!doc) throw { status: 404 };
+            return { ...doc };
+        },
+        put: async (doc: any) => {
+            const rev = `${(parseInt((docs.get(doc._id)?._rev ?? "0").split("-")[0]) || 0) + 1}-mock`;
+            docs.set(doc._id, { ...doc, _rev: rev });
+            return { ok: true, id: doc._id, rev };
+        },
+        allDocs: async (opts: any) => {
+            const rows: any[] = [];
+            for (const [id, doc] of docs.entries()) {
+                if (opts.startkey && id < opts.startkey) continue;
+                if (opts.endkey && id > opts.endkey) continue;
+                if ((doc as any)._deleted) continue;
+                rows.push({ id, doc: opts.include_docs ? doc : undefined });
+            }
+            return { rows };
+        },
+    };
+}
+
 describe("WebhookChannel", () => {
     let channel: any;
     let fetchSpy: any;
@@ -134,5 +160,81 @@ describe("SmtpChannel", () => {
             { type: "mention" as const, title: "T", body: "B", actor: "a", targets: ["b"], timestamp: "2026-02-12T10:00:00Z" },
         );
         expect(result).toBe(false);
+    });
+});
+
+describe("NotificationStore", () => {
+    let store: any;
+    let mockDB: any;
+
+    beforeEach(async () => {
+        const { NotificationStore } = await import(
+            "../../src/modules/features/TeamSync/NotificationStore"
+        );
+        mockDB = createMockDB();
+        store = new NotificationStore({ localDatabase: mockDB } as any);
+    });
+
+    it("should save and retrieve notification config", async () => {
+        const config = {
+            _id: "team:notifications:config" as const,
+            webhooks: [{ url: "https://hooks.slack.com/test", platform: "slack" as const, enabled: true, label: "Slack" }],
+            smtp: { host: "smtp.example.com", port: 587, secure: false, username: "user", password: "pass", fromAddress: "team@example.com", enabled: true },
+        };
+        await store.saveConfig(config);
+        const fetched = await store.getConfig();
+        expect(fetched).not.toBeNull();
+        expect(fetched!.webhooks.length).toBe(1);
+        expect(fetched!.smtp.host).toBe("smtp.example.com");
+    });
+
+    it("should return null for missing config", async () => {
+        const result = await store.getConfig();
+        expect(result).toBeNull();
+    });
+
+    it("should save and retrieve user preferences", async () => {
+        const prefs = {
+            _id: "team:notifications:prefs:bob" as const,
+            username: "bob",
+            email: "bob@example.com",
+            enabledEvents: ["mention" as const, "annotation-reply" as const],
+            channels: { email: true, webhook: true },
+        };
+        await store.savePrefs(prefs);
+        const fetched = await store.getPrefs("bob");
+        expect(fetched).not.toBeNull();
+        expect(fetched!.email).toBe("bob@example.com");
+        expect(fetched!.enabledEvents).toContain("mention");
+    });
+
+    it("should return null for missing user preferences", async () => {
+        const result = await store.getPrefs("nonexistent");
+        expect(result).toBeNull();
+    });
+
+    it("should list all user preferences", async () => {
+        await store.savePrefs({
+            _id: "team:notifications:prefs:alice" as const,
+            username: "alice", enabledEvents: ["mention" as const], channels: { email: false, webhook: true },
+        });
+        await store.savePrefs({
+            _id: "team:notifications:prefs:bob" as const,
+            username: "bob", enabledEvents: ["file-change" as const], channels: { email: true, webhook: false },
+        });
+        const all = await store.getAllPrefs();
+        expect(all.length).toBe(2);
+    });
+
+    it("should update existing preferences preserving _rev", async () => {
+        await store.savePrefs({
+            _id: "team:notifications:prefs:bob" as const,
+            username: "bob", enabledEvents: ["mention" as const], channels: { email: false, webhook: false },
+        });
+        const first = await store.getPrefs("bob");
+        first!.channels.email = true;
+        await store.savePrefs(first!);
+        const updated = await store.getPrefs("bob");
+        expect(updated!.channels.email).toBe(true);
     });
 });
