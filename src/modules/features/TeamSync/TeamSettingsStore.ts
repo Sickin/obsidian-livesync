@@ -41,7 +41,7 @@ export class TeamSettingsStore {
         const entry = await this.getEntry(pluginId);
         if (!entry) return false;
         delete entry.settings[settingKey];
-        await this.db.localDatabase.put(entry as any);
+        await this.saveEntry(entry);
         return true;
     }
 }

@@ -375,20 +375,25 @@ export class ModuleTeamSync extends AbstractObsidianModule {
         });
 
         // Listen for setting changes to detect member customizations
-        eventHub.onEvent(EVENT_SETTING_SAVED, async (settings: any) => {
-            if (!this._teamConfig?.features.settingsPush) return;
-            if (this.isCurrentUserAdmin()) return;
-            if (!this.settingsStore || !this.settingsApplier) return;
+        const offSettingSaved = eventHub.onEvent(EVENT_SETTING_SAVED, async (settings: any) => {
+            try {
+                if (!this._teamConfig?.features.settingsPush) return;
+                if (this.isCurrentUserAdmin()) return;
+                if (!this.settingsStore || !this.settingsApplier) return;
 
-            const entry = await this.settingsStore.getEntry("self-hosted-livesync");
-            if (!entry) return;
+                const entry = await this.settingsStore.getEntry("self-hosted-livesync");
+                if (!entry) return;
 
-            for (const key of Object.keys(entry.settings)) {
-                if (entry.settings[key].mode === "default") {
-                    await this.settingsApplier.detectCustomization(entry, key, (settings as any)[key]);
+                for (const key of Object.keys(entry.settings)) {
+                    if (entry.settings[key].mode === "default") {
+                        await this.settingsApplier.detectCustomization(entry, key, (settings as any)[key]);
+                    }
                 }
+            } catch (e) {
+                this._log(`Failed to detect setting customization: ${e}`, LOG_LEVEL_INFO);
             }
         });
+        this.plugin.register(offSettingSaved);
 
         return Promise.resolve(true);
     }
@@ -557,16 +562,18 @@ export class ModuleTeamSync extends AbstractObsidianModule {
         if (!this._teamConfig?.features.settingsPush) return;
         if (this.isCurrentUserAdmin()) return;
         if (!this.settingsStore || !this.settingsApplier) return;
+        if (pluginId !== "self-hosted-livesync") return;
 
-        const entry = await this.settingsStore.getEntry(pluginId);
-        if (!entry) return;
+        try {
+            const entry = await this.settingsStore.getEntry(pluginId);
+            if (!entry) return;
 
-        if (pluginId === "self-hosted-livesync") {
             const currentSettings = { ...this.settings } as Record<string, unknown>;
             const result = await this.settingsApplier.apply(entry, currentSettings);
 
             let changed = false;
-            for (const [key, value] of Object.entries(result.applied)) {
+            for (const key of Object.keys(entry.settings)) {
+                const value = result.applied[key];
                 if ((this.settings as any)[key] !== value) {
                     (this.settings as any)[key] = value;
                     changed = true;
@@ -583,6 +590,8 @@ export class ModuleTeamSync extends AbstractObsidianModule {
                 pluginId,
                 enforced: result.enforced,
             });
+        } catch (e) {
+            this._log(`Failed to apply team settings for ${pluginId}: ${e}`, LOG_LEVEL_INFO);
         }
     }
 

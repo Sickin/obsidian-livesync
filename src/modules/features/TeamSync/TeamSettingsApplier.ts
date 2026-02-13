@@ -38,7 +38,11 @@ export class TeamSettingsApplier {
         const spec = entry.settings[settingKey];
         if (!spec || spec.mode !== "default") return;
 
-        if (newValue === spec.value) {
+        const valuesMatch = typeof newValue === "object" || typeof spec.value === "object"
+            ? JSON.stringify(newValue) === JSON.stringify(spec.value)
+            : newValue === spec.value;
+
+        if (valuesMatch) {
             await this.overrideTracker.clearOverride(pluginId, settingKey);
         } else {
             await this.overrideTracker.markOverridden(pluginId, settingKey);
