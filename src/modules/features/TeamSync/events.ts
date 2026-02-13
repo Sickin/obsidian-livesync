@@ -11,6 +11,8 @@ declare global {
         "team-annotation-resolved": TeamAnnotation;
         "team-settings-applied": { pluginId: string; enforced: string[] };
         "team-settings-changed": { pluginId: string };
+        "team-notification-sent": { target: string; type: string; channel: string };
+        "team-notification-failed": { target: string; type: string; channel: string; error: string };
     }
 }
 
@@ -22,3 +24,5 @@ export const EVENT_TEAM_ANNOTATION_UPDATED = "team-annotation-updated" as const;
 export const EVENT_TEAM_ANNOTATION_RESOLVED = "team-annotation-resolved" as const;
 export const EVENT_TEAM_SETTINGS_APPLIED = "team-settings-applied" as const;
 export const EVENT_TEAM_SETTINGS_CHANGED = "team-settings-changed" as const;
+export const EVENT_TEAM_NOTIFICATION_SENT = "team-notification-sent" as const;
+export const EVENT_TEAM_NOTIFICATION_FAILED = "team-notification-failed" as const;

@@ -37,6 +37,10 @@ import { TeamSettingsStore } from "./TeamSettingsStore.ts";
 import { TeamOverrideTracker } from "./TeamOverrideTracker.ts";
 import { TeamSettingsApplier } from "./TeamSettingsApplier.ts";
 import { EVENT_SETTING_SAVED } from "../../../lib/src/events/coreEvents.ts";
+import { NotificationStore } from "./NotificationStore.ts";
+import { NotificationService } from "./NotificationService.ts";
+import { WebhookChannel } from "./WebhookChannel.ts";
+import { SmtpChannel } from "./SmtpChannel.ts";
 
 export class ModuleTeamSync extends AbstractObsidianModule {
     private _teamConfig: TeamConfig | undefined;
@@ -50,6 +54,8 @@ export class ModuleTeamSync extends AbstractObsidianModule {
     overrideTracker: TeamOverrideTracker | undefined;
     settingsApplier: TeamSettingsApplier | undefined;
     private _enforcedSettings = new Map<string, Set<string>>();
+    notificationStore: NotificationStore | undefined;
+    notificationService: NotificationService | undefined;
 
     /**
      * Whether team mode is currently enabled.
@@ -123,6 +129,14 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             const overrideStore = this.services.database.openSimpleStore<any>("team-overrides");
             this.overrideTracker = new TeamOverrideTracker(overrideStore);
             this.settingsApplier = new TeamSettingsApplier(this.overrideTracker);
+
+            // Initialize notification system
+            this.notificationStore = new NotificationStore(this.localDatabase);
+            this.notificationService = new NotificationService(
+                this.notificationStore,
+                new WebhookChannel(),
+                new SmtpChannel(),
+            );
 
             // Apply team settings on initial load
             if (this._teamConfig?.features.settingsPush && !this.isCurrentUserAdmin()) {
@@ -374,6 +388,46 @@ export class ModuleTeamSync extends AbstractObsidianModule {
             },
         });
 
+        // Notify on @mentions in annotations
+        const offAnnotationCreated = eventHub.onEvent(EVENT_TEAM_ANNOTATION_CREATED, async (annotation: any) => {
+            if (!this.notificationService || !annotation?.mentions?.length) return;
+            try {
+                await this.notificationService.dispatch({
+                    type: "mention",
+                    title: "New mention",
+                    body: `${annotation.author} mentioned you: "${annotation.content.slice(0, 100)}"`,
+                    actor: annotation.author,
+                    targets: annotation.mentions,
+                    timestamp: annotation.timestamp ?? new Date().toISOString(),
+                    metadata: { filePath: annotation.filePath, annotationId: annotation._id },
+                });
+            } catch (e) {
+                this._log(`Notification dispatch failed: ${e}`, LOG_LEVEL_INFO);
+            }
+        });
+        this.plugin.register(offAnnotationCreated);
+
+        // Notify on annotation replies
+        const offAnnotationUpdated = eventHub.onEvent(EVENT_TEAM_ANNOTATION_UPDATED, async (annotation: any) => {
+            if (!this.notificationService || !annotation?.parentId) return;
+            try {
+                const parent = await this.annotationStore?.getById(annotation.parentId);
+                if (!parent || parent.author === annotation.author) return;
+                await this.notificationService.dispatch({
+                    type: "annotation-reply",
+                    title: "New reply",
+                    body: `${annotation.author} replied: "${annotation.content.slice(0, 100)}"`,
+                    actor: annotation.author,
+                    targets: [parent.author],
+                    timestamp: annotation.timestamp ?? new Date().toISOString(),
+                    metadata: { filePath: annotation.filePath, annotationId: annotation._id },
+                });
+            } catch (e) {
+                this._log(`Notification dispatch failed: ${e}`, LOG_LEVEL_INFO);
+            }
+        });
+        this.plugin.register(offAnnotationUpdated);
+
         // Listen for setting changes to detect member customizations
         const offSettingSaved = eventHub.onEvent(EVENT_SETTING_SAVED, async (settings: any) => {
             try {
@@ -548,6 +602,78 @@ export class ModuleTeamSync extends AbstractObsidianModule {
                     origCleanup?.();
                     unmount(settingsComponent);
                 };
+            }
+
+            // Mount notification config for admins
+            if (this.isCurrentUserAdmin() && this.notificationStore) {
+                const { default: NotificationConfigPane } = await import("./NotificationConfigPane.svelte");
+                const notifContainer = containerEl.createDiv();
+                const notifComponent = mount(NotificationConfigPane, {
+                    target: notifContainer,
+                    props: {
+                        getConfig: () => this.notificationStore!.getConfig(),
+                        onSave: async (partial: any) => {
+                            await this.notificationStore!.saveConfig({
+                                _id: "team:notifications:config" as const,
+                                ...partial,
+                            });
+                        },
+                        onTest: async (channel: string) => {
+                            const testNotification = {
+                                type: "mention" as const,
+                                title: "Test Notification",
+                                body: "This is a test notification from LiveSync Team.",
+                                actor: this.getCurrentUsername(),
+                                targets: [this.getCurrentUsername()],
+                                timestamp: new Date().toISOString(),
+                            };
+                            try {
+                                if (channel === "smtp") {
+                                    const config = await this.notificationStore!.getConfig();
+                                    if (!config?.smtp?.enabled) return false;
+                                    const smtpChannel = new SmtpChannel();
+                                    const prefs = await this.notificationStore!.getPrefs(this.getCurrentUsername());
+                                    const email = prefs?.email;
+                                    if (!email) return false;
+                                    return await smtpChannel.send(config.smtp, email, testNotification);
+                                } else {
+                                    const config = await this.notificationStore!.getConfig();
+                                    if (!config?.webhooks?.length) return false;
+                                    const webhookChannel = new WebhookChannel();
+                                    const enabled = config.webhooks.filter(w => w.enabled);
+                                    if (!enabled.length) return false;
+                                    return await webhookChannel.send(enabled[0], testNotification);
+                                }
+                            } catch { return false; }
+                        },
+                    },
+                });
+                const prev1 = (containerEl as any).__teamPaneCleanup;
+                (containerEl as any).__teamPaneCleanup = () => { prev1?.(); unmount(notifComponent); };
+            }
+
+            // Mount notification preferences for all users
+            if (this.notificationStore) {
+                const { default: NotificationPrefsPane } = await import("./NotificationPrefsPane.svelte");
+                const prefsContainer = containerEl.createDiv();
+                const config = await this.notificationStore.getConfig();
+                const prefsComponent = mount(NotificationPrefsPane, {
+                    target: prefsContainer,
+                    props: {
+                        username: this.getCurrentUsername(),
+                        getPrefs: () => this.notificationStore!.getPrefs(this.getCurrentUsername()),
+                        onSave: async (partial: any) => {
+                            await this.notificationStore!.savePrefs({
+                                _id: `team:notifications:prefs:${this.getCurrentUsername()}` as `team:notifications:prefs:${string}`,
+                                ...partial,
+                            });
+                        },
+                        hasSmtp: config?.smtp?.enabled ?? false,
+                        hasWebhooks: (config?.webhooks?.filter((w: any) => w.enabled).length ?? 0) > 0,
+                    },
+                });
+                const prev2 = (containerEl as any).__teamPaneCleanup;
+                (containerEl as any).__teamPaneCleanup = () => { prev2?.(); unmount(prefsComponent); };
             }
         });
 
