@@ -309,3 +309,99 @@ describe("TeamSettingsApplier", () => {
         expect(await overrideTracker.isOverridden("self-hosted-livesync", "syncOnStart")).toBe(false);
     });
 });
+
+describe("Phase 5 Integration", () => {
+    it("should export TeamSettingsStore with all methods", async () => {
+        const { TeamSettingsStore } = await import(
+            "../../src/modules/features/TeamSync/TeamSettingsStore"
+        );
+        const methods = ["getEntry", "getAllEntries", "saveEntry", "removeSetting"];
+        for (const m of methods) {
+            expect(typeof TeamSettingsStore.prototype[m]).toBe("function");
+        }
+    });
+
+    it("should export TeamOverrideTracker with all methods", async () => {
+        const { TeamOverrideTracker } = await import(
+            "../../src/modules/features/TeamSync/TeamOverrideTracker"
+        );
+        const methods = ["isOverridden", "markOverridden", "clearOverride", "getOverrides", "clearAllOverrides"];
+        for (const m of methods) {
+            expect(typeof TeamOverrideTracker.prototype[m]).toBe("function");
+        }
+    });
+
+    it("should export TeamSettingsApplier with all methods", async () => {
+        const { TeamSettingsApplier } = await import(
+            "../../src/modules/features/TeamSync/TeamSettingsApplier"
+        );
+        const methods = ["apply", "detectCustomization"];
+        for (const m of methods) {
+            expect(typeof TeamSettingsApplier.prototype[m]).toBe("function");
+        }
+    });
+
+    it("should export settings governance events", async () => {
+        const { EVENT_TEAM_SETTINGS_APPLIED, EVENT_TEAM_SETTINGS_CHANGED } = await import(
+            "../../src/modules/features/TeamSync/events"
+        );
+        expect(EVENT_TEAM_SETTINGS_APPLIED).toBe("team-settings-applied");
+        expect(EVENT_TEAM_SETTINGS_CHANGED).toBe("team-settings-changed");
+    });
+
+    it("should apply settings end-to-end: store → apply → override → re-apply", async () => {
+        const { TeamSettingsStore } = await import(
+            "../../src/modules/features/TeamSync/TeamSettingsStore"
+        );
+        const { TeamOverrideTracker } = await import(
+            "../../src/modules/features/TeamSync/TeamOverrideTracker"
+        );
+        const { TeamSettingsApplier } = await import(
+            "../../src/modules/features/TeamSync/TeamSettingsApplier"
+        );
+
+        const mockDB = createMockDB();
+        const settingsStore = new TeamSettingsStore({ localDatabase: mockDB } as any);
+
+        const overrideData = new Map<string, any>();
+        const mockOverrideStore = {
+            get: async (key: string) => overrideData.get(key),
+            set: async (key: string, value: any) => { overrideData.set(key, value); },
+            delete: async (key: string) => { overrideData.delete(key); },
+        };
+        const overrideTracker = new TeamOverrideTracker(mockOverrideStore as any);
+        const applier = new TeamSettingsApplier(overrideTracker);
+
+        // Admin saves team settings
+        await settingsStore.saveEntry({
+            _id: "team:settings:self-hosted-livesync" as `team:settings:${string}`,
+            managedBy: "alice",
+            updatedAt: new Date().toISOString(),
+            settings: {
+                liveSync: { value: true, mode: "enforced" },
+                syncOnStart: { value: true, mode: "default" },
+                batchSave: { value: false, mode: "default" },
+            },
+        });
+
+        const memberSettings = { liveSync: false, syncOnStart: false, batchSave: true, deviceName: "laptop" };
+
+        // First apply
+        const entry = await settingsStore.getEntry("self-hosted-livesync");
+        const result1 = await applier.apply(entry!, memberSettings);
+        expect(result1.applied.liveSync).toBe(true);
+        expect(result1.applied.syncOnStart).toBe(true);
+        expect(result1.applied.batchSave).toBe(false);
+        expect(result1.applied.deviceName).toBe("laptop");
+
+        // Member customizes syncOnStart
+        await applier.detectCustomization(entry!, "syncOnStart", false);
+        expect(await overrideTracker.isOverridden("self-hosted-livesync", "syncOnStart")).toBe(true);
+
+        // Re-apply — member's override preserved
+        const result2 = await applier.apply(entry!, { ...memberSettings, syncOnStart: false });
+        expect(result2.applied.syncOnStart).toBe(false);
+        expect(result2.applied.liveSync).toBe(true);
+        expect(result2.applied.batchSave).toBe(false);
+    });
+});
