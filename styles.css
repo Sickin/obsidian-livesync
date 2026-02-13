@@ -999,3 +999,132 @@ div.workspace-leaf-content[data-type=bases]  .livesync-status {
     display: flex;
     justify-content: flex-end;
 }
+
+/* ── Phase 6: Notification Settings ────────────────────── */
+
+.team-notification-config {
+    padding: 12px 0;
+}
+
+.team-notification-config h3 {
+    margin: 0 0 12px 0;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.team-webhook-list {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.team-webhook-item {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    padding: 8px 10px;
+    border-radius: 4px;
+    background: var(--background-secondary);
+}
+
+.team-webhook-item input[type="text"] {
+    flex: 1;
+    min-width: 0;
+}
+
+.team-webhook-item select {
+    width: 100px;
+}
+
+.team-webhook-item .team-webhook-remove {
+    color: var(--text-error);
+    cursor: pointer;
+    padding: 2px 6px;
+    border: none;
+    background: none;
+}
+
+.team-smtp-config {
+    display: grid;
+    grid-template-columns: auto 1fr;
+    gap: 6px 12px;
+    align-items: center;
+    padding: 8px 10px;
+    border-radius: 4px;
+    background: var(--background-secondary);
+    margin-bottom: 12px;
+}
+
+.team-smtp-config label {
+    font-size: 0.85em;
+    color: var(--text-muted);
+    text-align: right;
+}
+
+.team-smtp-config input {
+    padding: 4px 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 0.85em;
+}
+
+.team-notification-prefs {
+    padding: 12px 0;
+}
+
+.team-notification-prefs h3 {
+    margin: 0 0 8px 0;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.team-notification-prefs-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: var(--background-secondary);
+    margin-bottom: 4px;
+}
+
+.team-notification-prefs-row label {
+    font-size: 0.85em;
+}
+
+.team-notification-channel-toggles {
+    display: flex;
+    gap: 12px;
+    align-items: center;
+}
+
+.team-notification-channel-toggles label {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 0.8em;
+    color: var(--text-muted);
+}
+
+.team-notification-test {
+    margin-top: 8px;
+    display: flex;
+    gap: 8px;
+    align-items: center;
+}
+
+.team-notification-test-result {
+    font-size: 0.8em;
+    color: var(--text-muted);
+}
+
+.team-notification-test-result.success {
+    color: var(--text-success);
+}
+
+.team-notification-test-result.error {
+    color: var(--text-error);
+}
