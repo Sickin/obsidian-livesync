@@ -826,3 +826,176 @@ div.workspace-leaf-content[data-type=bases]  .livesync-status {
     font-size: 0.8em;
     flex: 1;
 }
+
+/* ── Phase 5: Team Settings Governance ─────────────────── */
+
+/* Admin Settings Manager */
+.team-settings-manager {
+    padding: 12px 0;
+}
+
+.team-settings-manager-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.team-settings-manager-header h3 {
+    margin: 0;
+    font-size: 1em;
+    font-weight: 600;
+}
+
+.team-settings-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.team-settings-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 6px 10px;
+    border-radius: 4px;
+    background: var(--background-secondary);
+}
+
+.team-settings-row:hover {
+    background: var(--background-secondary-alt);
+}
+
+.team-settings-row-key {
+    font-family: var(--font-monospace);
+    font-size: 0.85em;
+    flex: 1;
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.team-settings-row-value {
+    font-size: 0.8em;
+    color: var(--text-muted);
+    max-width: 120px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    margin: 0 8px;
+}
+
+/* Three-state mode toggle */
+.team-settings-mode-toggle {
+    display: inline-flex;
+    border-radius: 4px;
+    overflow: hidden;
+    border: 1px solid var(--background-modifier-border);
+    flex-shrink: 0;
+}
+
+.team-settings-mode-toggle button {
+    padding: 2px 8px;
+    font-size: 0.75em;
+    border: none;
+    background: transparent;
+    color: var(--text-muted);
+    cursor: pointer;
+    transition: background 0.15s, color 0.15s;
+}
+
+.team-settings-mode-toggle button:not(:last-child) {
+    border-right: 1px solid var(--background-modifier-border);
+}
+
+.team-settings-mode-toggle button.active-none {
+    background: var(--background-primary);
+    color: var(--text-normal);
+}
+
+.team-settings-mode-toggle button.active-default {
+    background: var(--interactive-accent);
+    color: var(--text-on-accent);
+}
+
+.team-settings-mode-toggle button.active-enforced {
+    background: var(--text-error);
+    color: white;
+}
+
+/* Lockout indicator for enforced settings */
+.team-setting-enforced {
+    position: relative;
+    opacity: 0.7;
+    pointer-events: none;
+}
+
+.team-setting-enforced::after {
+    content: "Managed by team admin";
+    position: absolute;
+    top: 50%;
+    right: 12px;
+    transform: translateY(-50%);
+    font-size: 0.75em;
+    color: var(--text-error);
+    font-style: italic;
+    pointer-events: none;
+}
+
+.team-setting-enforced .setting-item-control {
+    opacity: 0.5;
+}
+
+/* Team settings notice banner */
+.team-settings-notice {
+    background: var(--background-secondary);
+    border-left: 3px solid var(--interactive-accent);
+    padding: 8px 12px;
+    margin-bottom: 12px;
+    border-radius: 0 4px 4px 0;
+    font-size: 0.85em;
+    color: var(--text-muted);
+}
+
+.team-settings-notice strong {
+    color: var(--text-normal);
+}
+
+/* Settings search/filter in admin UI */
+.team-settings-search {
+    width: 100%;
+    padding: 6px 10px;
+    margin-bottom: 8px;
+    border: 1px solid var(--background-modifier-border);
+    border-radius: 4px;
+    background: var(--background-primary);
+    color: var(--text-normal);
+    font-size: 0.85em;
+}
+
+.team-settings-search:focus {
+    border-color: var(--interactive-accent);
+    outline: none;
+}
+
+/* Category grouping */
+.team-settings-category {
+    margin-top: 8px;
+}
+
+.team-settings-category-header {
+    font-size: 0.8em;
+    font-weight: 600;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    padding: 4px 10px;
+}
+
+/* Save button */
+.team-settings-save {
+    margin-top: 12px;
+    display: flex;
+    justify-content: flex-end;
+}
